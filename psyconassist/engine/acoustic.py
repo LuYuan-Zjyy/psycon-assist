@@ -7,20 +7,19 @@ import numpy as np
 
 
 def available() -> bool:
+    # numpy is enough for the 16 kHz mono PCM written by S0 (see core/audio.py);
+    # torchaudio is only a fallback for exotic formats.
     try:
-        import torchaudio  # noqa: F401
+        import numpy  # noqa: F401
         return True
     except Exception:
         return False
 
 
 def _load_wav(wav: Path):
-    import torchaudio
+    from ..core.audio import load_mono
 
-    waveform, sr = torchaudio.load(str(wav))
-    if waveform.shape[0] > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)  # 单声道化
-    return waveform.squeeze(0).numpy(), sr
+    return load_mono(Path(wav))
 
 
 def _f0_autocorr(signal: np.ndarray, sr: int, fmin: float = 60.0, fmax: float = 400.0) -> float:

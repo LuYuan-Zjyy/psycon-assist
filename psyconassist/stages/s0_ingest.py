@@ -41,7 +41,8 @@ def run(
     paths = SessionPaths(session_id)
     paths.ensure_layout()
 
-    if overwrite or not paths.media_json.exists():
+    # 复用一个已存在的 session 只有在产物齐全时才安全，否则重建
+    if overwrite or not paths.media_json.exists() or not paths.audio_wav.exists():
         info = ff.probe(video_path)
         if not info["has_audio"]:
             raise StageError("s0", "缺少音轨，无法分析（硬条件不满足，abort）。")
@@ -69,4 +70,7 @@ def run(
         log.info("S0 done session=%s duration=%.1fs", session_id, media["duration"])
         return media
 
-    return read_json(paths.media_json)
+    media = read_json(paths.media_json)
+    if not media.get("audio_path") or not Path(media["audio_path"]).exists():
+        raise StageError("s0", "session 已存在但音频缺失，请用 overwrite=True 或换一个 session_id")
+    return media

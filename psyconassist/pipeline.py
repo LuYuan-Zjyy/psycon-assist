@@ -30,6 +30,24 @@ log = get_logger(__name__)
 ProgressCb = Callable[[str, str], None]
 
 
+def _next_session_id() -> str:
+    """按日期取下一个空闲 session id，避免每次 CLI 都覆盖 S<date>-001。"""
+    import datetime
+
+    from . import config
+
+    today = datetime.datetime.now().strftime("%Y%m%d")
+    seq = 0
+    if config.DATA_ROOT.exists():
+        for d in config.DATA_ROOT.iterdir():
+            if d.is_dir() and d.name.startswith(f"S{today}-"):
+                try:
+                    seq = max(seq, int(d.name.rsplit("-", 1)[1]))
+                except (ValueError, IndexError):
+                    pass
+    return ids.session_id(seq + 1)
+
+
 def run_full(
     video: Path,
     client_voice_sample: list[float],
@@ -40,7 +58,7 @@ def run_full(
 ) -> PipelineSummary:
     """真实视频全流程。``progress(stage, detail)`` 可选。"""
     del use_llm  # 保留签名兼容；LLM 可用性由 llm.available() 决定
-    session_id = session_id or ids.session_id(1)
+    session_id = session_id or _next_session_id()
     _emit(progress, "s0", "接入与归一化")
     media = s0_ingest.run(session_id, Path(video), client_voice_sample)
     return _run_stages(session_id, subject_id, media, progress=progress)
@@ -53,7 +71,7 @@ def run_synthetic(
     session_id: str | None = None,
 ) -> PipelineSummary:
     """合成数据全流程（S1 用桩 + S2–S6 真实逻辑）。"""
-    session_id = session_id or ids.session_id(1)
+    session_id = session_id or _next_session_id()
     synthetic.generate(session_id, duration, seed)
     media: MediaInfo = {
         "session_id": session_id,

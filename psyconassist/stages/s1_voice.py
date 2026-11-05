@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ..core.audio import load_mono
 from ..core.io import write_json
 from ..core.logging_utils import get_logger
 from ..core.models import MediaInfo, StageReport
@@ -26,7 +27,13 @@ def run(session_id: str, media: MediaInfo) -> StageReport:
     client_sample = media.get("client_voice_sample") or []
     duration = float(media["duration"])
 
-    vad = _vad_energy(wav, duration)
+    vad_failed = False
+    try:
+        vad = _vad_energy(wav, duration)
+    except Exception:
+        log.exception("VAD 失败，按整段有声处理 session=%s", session_id)
+        vad = [(0.0, duration)]
+        vad_failed = True
 
     diarize_ok = False
     if pya.available():
@@ -79,6 +86,8 @@ def run(session_id: str, media: MediaInfo) -> StageReport:
     write_json(paths.vad_json, vad_out)
 
     degrade = []
+    if vad_failed:
+        degrade.append("vad")
     if not diarize_ok:
         degrade.append("speaker_diarization")
     voice_unavailable = not aco.available()
@@ -106,12 +115,7 @@ def _vad_energy(
     min_len: float = 0.2,
     min_gap: float = 0.3,
 ) -> list[tuple[float, float]]:
-    import torchaudio
-
-    waveform, sr = torchaudio.load(str(wav))
-    if waveform.shape[0] > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)
-    sig = waveform.squeeze(0).numpy()
+    sig, sr = load_mono(wav)
     hop = int(0.01 * sr)
     segs: list[tuple[float, float]] = []
     start = None
