@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PsyConAssist · 会谈分析</title>
+  <link rel="stylesheet" href="/style.css" />
+  <script src="/echarts.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">Ψ</span>
+      <span class="brand-name">PsyConAssist</span>
+      <span class="brand-sub">会谈分析工作台</span>
+    </div>
+    <div class="topbar-selects">
+      <label>来访者
+        <select id="subject-select"></select>
+      </label>
+      <label>会谈
+        <select id="session-select"></select>
+      </label>
+      <button id="upload-btn" class="upload-btn">＋ 上传新视频</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="timeline">时间轴</button>
+    <button class="tab" data-tab="claims">草稿复核 <span id="claims-badge" class="badge"></span></button>
+    <button class="tab" data-tab="profile">来访者画像</button>
+  </nav>
+
+  <main>
+    <!-- 时间轴视图 -->
+    <section id="view-timeline" class="view active">
+      <div id="quality-banner" class="quality-banner hidden"></div>
+      <div class="grid-2">
+        <div class="card video-card">
+          <div class="card-head"><h2>录像</h2><span id="video-meta" class="muted"></span></div>
+          <div class="video-wrap" id="video-wrap">
+            <video id="video" controls preload="metadata"></video>
+            <div id="video-placeholder" class="video-placeholder hidden">
+              <div class="ph-icon">▶</div>
+              <div>当前为合成演示数据，无真实视频</div>
+              <div class="muted">接入真实样片后此处将显示可跳转录像</div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h2>效价 / 唤醒轨迹</h2>
+            <div class="legend">
+              <span class="dot dot-v"></span>效价
+              <span class="dot dot-a"></span>唤醒
+              <span class="dot dot-anom"></span>异常段
+            </div>
+          </div>
+          <div id="va-chart" class="chart"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>实时信号监控</h2>
+          <span class="muted">S1 三路特征 · 语音声学 / 文本极性（人脸 AU 需本机 OpenFace）</span>
+        </div>
+        <div class="grid-2">
+          <div>
+            <div class="sig-title">语音声学（来访者）</div>
+            <div id="sig-voice-chart" class="chart"></div>
+          </div>
+          <div>
+            <div class="sig-title">文本极性 / 风险</div>
+            <div id="sig-pol-chart" class="chart"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>事件</h2>
+          <span class="muted">点击事件跳转到对应时间</span>
+        </div>
+        <div id="event-list" class="event-list"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>转写</h2>
+          <span id="transcript-meta" class="muted"></span>
+        </div>
+        <div id="transcript-list" class="transcript-list"></div>
+      </div>
+    </section>
+
+    <!-- 草稿复核视图 -->
+    <section id="view-claims" class="view">
+      <div class="claims-toolbar">
+        <div class="filters" id="claim-filters">
+          <button class="chip active" data-filter="all">全部</button>
+          <button class="chip" data-filter="pending">待复核</button>
+          <button class="chip" data-filter="edit">已改写</button>
+          <button class="chip" data-filter="reject">已否决</button>
+          <button class="chip" data-filter="accept">已采纳</button>
+        </div>
+        <span id="claim-stats" class="muted"></span>
+      </div>
+      <div id="claim-list" class="claim-list"></div>
+    </section>
+
+    <!-- 画像视图 -->
+    <section id="view-profile" class="view">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h2>来访者画像</h2></div>
+          <div id="profile-summary"></div>
+          <div class="profile-metrics" id="profile-metrics"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>跨次会话</h2></div>
+          <div id="subject-sessions" class="session-list"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>反馈分布</h2></div>
+        <div id="feedback-chart" class="chart"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>历史采纳示例（RAG 素材）</h2></div>
+        <div id="exemplar-list" class="exemplar-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- 上传弹窗 -->
+  <div id="upload-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2>上传新会谈视频</h2>
+        <button class="modal-close" id="modal-close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <label>来访者 ID</label>
+          <input id="up-subject" type="text" placeholder="如 P-0001（新来访者可填新 ID）" value="P-0001" />
+        </div>
+        <div class="form-row">
+          <label>视频文件（mp4/mov，画面=来访者单脸，声音=双人）</label>
+          <div class="dropzone" id="dropzone">
+            <input id="up-file" type="file" accept=".mp4,.mov,video/*" hidden />
+            <div class="dz-inner">
+              <div class="dz-icon">⬆</div>
+              <div id="dz-text">点击选择文件，或拖拽到此处</div>
+            </div>
+          </div>
+          <div id="file-info" class="muted" style="margin-top:6px"></div>
+        </div>
+        <div class="form-row form-inline">
+          <div>
+            <label>来访者声音样本起始（秒）</label>
+            <input id="up-t0" type="number" step="0.1" min="0" placeholder="如 12.4" />
+          </div>
+          <div>
+            <label>结束（秒）</label>
+            <input id="up-t1" type="number" step="0.1" min="0" placeholder="如 15.4" />
+          </div>
+        </div>
+        <div class="form-hint">声音样本：播放录像中「来访者说话」的任一段 3 秒左右区间，用于识别来访者的声音。</div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-ghost" id="modal-cancel">取消</button>
+        <button class="btn btn-accept" id="modal-submit">开始分析</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 处理进度 -->
+  <div id="progress-bar" class="progress hidden">
+    <div class="progress-inner">
+      <div class="spinner"></div>
+      <div id="progress-text">正在处理…</div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

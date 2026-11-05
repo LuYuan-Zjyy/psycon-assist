@@ -1,0 +1,31 @@
+# PsyConAssist 依赖
+# 核心（必装）
+numpy>=1.26
+pandas>=2.0
+pyarrow>=14.0
+python-dotenv>=1.0
+langchain>=0.3
+langgraph>=0.2
+langchain-openai>=0.2
+openai>=1.30
+
+# ---- 重模型引擎（按需安装，缺失会自动降级并标「不可得」）----
+
+# S0 转码：需系统安装 ffmpeg（非 pip 包）
+#   Windows: winget install Gyan.FFmpeg  （然后重开终端）
+
+# S1A 视觉：OpenFace 为外部程序，非 pip 包
+#   下载 OpenFace Windows 版，配置 OPENFACE_BIN 指向 FeatureExtraction.exe
+
+# S1B 语音声学
+#librosa>=0.10
+#soundfile>=0.12
+
+# S1B 说话人分离
+#pyannote.audio>=3.1
+
+# S1C ASR
+#faster-whisper>=1.0
+
+# S1C 中文情感极性（可用 transformers 现成模型，或 sentence-transformers 已有）
+#transformers>=4.40

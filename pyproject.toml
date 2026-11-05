@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "psyconassist"
+version = "0.1.0"
+description = "An auditable session-analysis assistant for psychological counseling — evidence-linked events, hard rules, and a human feedback loop."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "LuYuan-Zjyy" }]
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+    "python-dotenv>=1.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "langchain>=0.3",
+    "langgraph>=0.2",
+    "langchain-openai>=0.2",
+    "openai>=1.30",
+]
+
+[project.optional-dependencies]
+media = [
+    "librosa>=0.10",
+    "soundfile>=0.12",
+    "faster-whisper>=1.0",
+    "pyannote.audio>=3.1",
+]
+dev = ["ruff>=0.6", "pytest>=8"]
+
+[project.scripts]
+psyconassist = "psyconassist.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["psyconassist*"]
+
+[tool.setuptools.package-data]
+psyconassist = ["web/*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"

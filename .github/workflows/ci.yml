@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Syntax & undefined names
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install ruff
+        run: pip install ruff
+      - name: Ruff (errors only)
+        run: ruff check --select E9,F63,F7,F82 --output-format=github psyconassist
+      - name: Byte-compile
+        run: python -m compileall -q psyconassist
+
+  demo-smoke:
+    name: Synthetic pipeline smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install minimal runtime deps
+        run: |
+          pip install numpy pandas pyarrow python-dotenv fastapi uvicorn langgraph langchain-core openai
+      - name: Run the synthetic pipeline (no video, no LLM key required)
+        run: python -m psyconassist.cli demo --subject CI-0001 --duration 300
