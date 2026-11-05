@@ -7,7 +7,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .. import llm
+from .. import config, llm
 from ..core.io import read_json_optional, write_json
 from ..core.logging_utils import get_logger
 from ..core.models import MediaInfo, StageReport
@@ -38,7 +38,7 @@ def run(session_id: str, media: MediaInfo) -> StageReport:
     raw: list[dict] = []
     if wh.available():
         try:
-            raw = wh.transcribe(wav)
+            raw = wh.transcribe(wav, model_size=config.ASR_MODEL, language=config.ASR_LANG)
             asr_ok = True
         except Exception:
             log.exception("Whisper ASR 失败 session=%s", session_id)

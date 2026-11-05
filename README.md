@@ -96,7 +96,7 @@ python -m psyconassist.cli run --video session.mp4 --subject P-0001 --client-sam
 
 `--client-sample` is the time window containing the client's voice only; it builds the speaker reference. Missing engines degrade explicitly and are reported in `quality.json`.
 
-Configuration comes from `.env` (see `.env.example`): `DS_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, optional `PSY_DATA_ROOT`, `PSY_MAX_UPLOAD_MB`, `OPENFACE_BIN`, `FFMPEG_BIN`.
+Configuration comes from `.env` (see `.env.example`): `DS_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, optional `PSY_DATA_ROOT`, `PSY_MAX_UPLOAD_MB`, `PSY_LANG` (ASR language, default `zh`), `PSY_ASR_MODEL` (default `small`), `OPENFACE_BIN`, `FFMPEG_BIN`.
 
 ## Security notes
 

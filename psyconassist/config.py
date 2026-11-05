@@ -26,6 +26,12 @@ LLM_API_KEY = os.getenv("DS_API_KEY", "") or os.getenv("LLM_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 
+# ---- ASR ----
+# 会谈语言（whisper 的 language 参数）：zh / en / ja ...
+ASR_LANG = os.getenv("PSY_LANG", "zh")
+# faster-whisper 模型大小：tiny / base / small / medium / large-v3
+ASR_MODEL = os.getenv("PSY_ASR_MODEL", "small")
+
 # ---- 重模型引擎 ----
 OPENFACE_BIN = os.getenv("OPENFACE_BIN", "")  # FeatureExtraction.exe 绝对路径
 HF_TOKEN = os.getenv("HF_TOKEN", "")
