@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 import threading
 import uuid
 from pathlib import Path
@@ -118,6 +119,20 @@ def _next_session_id() -> str:
     return ids.session_id(seq + 1, datetime.datetime.now())
 
 
+_PATH_WIN = re.compile(r"[A-Za-z]:\\[^\s'\"]+")
+_PATH_POSIX = re.compile(r"(?<![\w.])/(?:[\w.\-]+/)+[\w.\-]+")
+
+
+def _sanitize_error(exc: Exception) -> str:
+    """把异常变成可读的一行原因，同时抹掉绝对路径，避免泄漏目录结构。"""
+    lines = (str(exc) or "").strip().splitlines()
+    text = lines[0] if lines else ""
+    text = _PATH_WIN.sub("<path>", text)
+    text = _PATH_POSIX.sub("<path>", text)
+    text = text[:200].strip()
+    return text or type(exc).__name__
+
+
 def _run_pipeline_task(task_id: str, video_path: Path, subject_id: str,
                        client_sample: list[float]):
     def progress(stage: str, detail: str):
@@ -142,8 +157,8 @@ def _run_pipeline_task(task_id: str, video_path: Path, subject_id: str,
         log.exception("task %s failed", task_id)
         with _TASKS_LOCK:
             TASKS[task_id]["status"] = "failed"
-            # 不把异常原文（可能含绝对路径/内部细节）回传给前端
-            TASKS[task_id]["error"] = "处理失败，详情见服务端日志"
+            # 回传可读原因，但抹掉绝对路径；完整堆栈只进日志
+            TASKS[task_id]["error"] = _sanitize_error(e)
             TASKS[task_id]["error_type"] = type(e).__name__
 
 
