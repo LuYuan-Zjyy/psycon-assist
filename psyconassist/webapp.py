@@ -142,7 +142,9 @@ def _run_pipeline_task(task_id: str, video_path: Path, subject_id: str,
         log.exception("task %s failed", task_id)
         with _TASKS_LOCK:
             TASKS[task_id]["status"] = "failed"
-            TASKS[task_id]["error"] = str(e)
+            # 不把异常原文（可能含绝对路径/内部细节）回传给前端
+            TASKS[task_id]["error"] = "处理失败，详情见服务端日志"
+            TASKS[task_id]["error_type"] = type(e).__name__
 
 
 @app.post("/api/upload")
