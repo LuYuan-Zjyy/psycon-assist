@@ -75,41 +75,35 @@ data/
 
 ---
 
-## 四、待办（按优先级）
+## 四、待办（已全部拆成 Issue）
 
-### P0 — 正确性与安全（先做）
+**任务以 GitHub Issues 为准**，本文件只做索引。认领、讨论、进度都在对应的 issue 里。
 
-- [ ] **每条 severity 规则一个 fixture**
-      现在 5 类规则（`va_shift` / `risk` / `silence` / `incongruence` / `low_activation`）没有回归测试。
-      验收：`tests/fixtures/` 每条规则一个最小 chunk；改规则表会让测试红。
-- [ ] **上传限速/并发上限**
-      当前每个任务一个线程，无并发上限；大视频并发会打满 CPU/磁盘。
-      验收：超过 N 个并发任务时返回 429；`PSY_MAX_CONCURRENCY` 可配。
-- [x] **错误信息脱敏**
-      `_sanitize_error()` 把异常压成一行，抹掉 Windows/POSIX 绝对路径；完整堆栈只进服务端日志。
-      前端仍能看到可读原因（如"视频无音轨"），但看不到目录结构。
+| 优先级 | Issue | 内容 | 预估 |
+| :-- | :-- | :-- | :-- |
+| **P0** | [#1](https://github.com/LuYuan-Zjyy/psycon-assist/issues/1) | 每条 severity 规则一个 fixture（5 类规则目前无回归测试） | 3–4h · 新人友好 |
+| **P0** | [#2](https://github.com/LuYuan-Zjyy/psycon-assist/issues/2) | 上传改成有界队列，`PSY_MAX_CONCURRENCY` 限制并发 | 4–6h |
+| **P1** | [#3](https://github.com/LuYuan-Zjyy/psycon-assist/issues/3) | `synth` / `risk` 的英文 prompt 集 | 6–8h |
+| **P1** | [#4](https://github.com/LuYuan-Zjyy/psycon-assist/issues/4) | 时间线 UI：点事件跳转到视频对应秒数 | 8–12h |
+| **P1** | [#5](https://github.com/LuYuan-Zjyy/psycon-assist/issues/5) | 单场报告导出 Markdown | 3–4h · 新人友好 |
+| **P1** | [#6](https://github.com/LuYuan-Zjyy/psycon-assist/issues/6) | 第二个 ASR 引擎适配（验证信号层可插拔） | 6–8h |
+| **P2** | [#7](https://github.com/LuYuan-Zjyy/psycon-assist/issues/7) | Dockerfile（CPU-only 部署） | 3–4h · 新人友好 |
+| **P2** | [#8](https://github.com/LuYuan-Zjyy/psycon-assist/issues/8) | `data/` 迁移工具（`PSY_DATA_ROOT` 变更） | 2–3h |
+| **P2** | [#9](https://github.com/LuYuan-Zjyy/psycon-assist/issues/9) | 前端中英切换 | 4–6h |
+| **P2** | [#10](https://github.com/LuYuan-Zjyy/psycon-assist/issues/10) | 扩大 pytest 覆盖（切块 / severity / 反馈） | 4–6h |
 
-### P1 — 能力
+### 已完成（不再开 issue）
 
-- [ ] **英文 prompt 集**
-      `synth` / `risk` 两个节点目前只有中文模板，英文会谈质量不稳定。
-      验收：同一段英文证据，英文模板的 claim 合规率不低于中文模板。
-- [ ] **时间线 UI**
-      前端按时间轴回放：点 event 跳到视频对应秒数，高亮对应 transcript。
-      验收：任一 event 可一键定位；视频 seek 不黑屏（已用 faststart 保证）。
-- [ ] **报告导出（Markdown / PDF）**
-      给督导用的单场报告：事件表 + 证据 + 咨询师反馈。
-      验收：`GET /api/sessions/<id>/report.md` 返回完整报告。
-- [ ] **第二个 ASR 引擎适配**
-      证明信号层可插拔（现在只有 faster-whisper 路径）。
-      验收：换引擎不改 S2 之后任何代码。
+- [x] `core/` + `stages/` 重构，全流程文件化落盘
+- [x] 规则引擎决定 severity；LLM 仅 `synth` / `risk`
+- [x] 反馈闭环（六原因码）+ exemplar 回流
+- [x] 跨次画像 + 可比性阈值
+- [x] Web UI（绑定 127.0.0.1）
+- [x] 安全加固：ID 校验、上传体积上限、扩展名白名单
+- [x] 错误信息脱敏（`_sanitize_error`）
+- [x] 22 个 ID 校验单测 + CI `pytest` 步骤
 
-### P2 — 工程与体验
-
-- [ ] **`pytest` 骨架 + CI 跑测试**（当前 CI 只有 lint + demo smoke）
-- [ ] **Dockerfile**（CPU-only 镜像，重模型挂载）
-- [ ] **`data/` 迁移工具**（`PSY_DATA_ROOT` 变更时批量搬目录）
-- [ ] **前端国际化**（中/英切换）
+> 标签约定：`p0` / `p1` / `p2` 优先级，`good first issue` 新人可上手，`help wanted` 需要外部协助。
 
 ---
 
