@@ -11,8 +11,12 @@ from typing import Any, Literal, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from . import config
-from . import ids, io, llm
+from .. import ids, llm
+from ..core.io import read_json, read_json_optional, write_json
+from ..core.logging_utils import get_logger
+from ..core.paths import SessionPaths
+
+log = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # 21 条 limits（全量注入，不走检索）
@@ -79,17 +83,19 @@ def _fmt_mmss(t: float) -> str:
 
 
 def _ingest(state: State) -> dict:
-    session_id = state["session_id"]
-    wdir = config.session_dir(session_id)
-    events = io.read_json(wdir / "events" / "events.json")
-    quality = io.read_json(wdir / "quality.json") if (wdir / "quality.json").exists() else {}
-    evidence = {}
-    # 从 S3 的 evidence 重建（简化：从 events 的 evidence_ids + 生成时记录）
-    ev_path = wdir / "events" / "evidence.json"
-    if ev_path.exists():
-        evidence = {e["evidence_id"]: e for e in io.read_json(ev_path)}
-    return {"events": events, "evidence": evidence, "quality": quality,
-            "claims": [], "rewrite_count": 0, "feedback": []}
+    paths = SessionPaths(state["session_id"])
+    events = read_json(paths.events_json)
+    quality = read_json_optional(paths.quality_json, default={}) or {}
+    evidence_list = read_json_optional(paths.evidence_json, default=[]) or []
+    evidence = {e["evidence_id"]: e for e in evidence_list}
+    return {
+        "events": events,
+        "evidence": evidence,
+        "quality": quality,
+        "claims": [],
+        "rewrite_count": 0,
+        "feedback": [],
+    }
 
 
 def _quality_gate(state: State) -> Literal["abort", "timeline"]:
@@ -249,8 +255,7 @@ def _strip(state: State) -> dict:
 
 def _human(state: State) -> dict:
     """落库 claims（state=pending），交由 S5 反馈。"""
-    wdir = config.session_dir(state["session_id"])
-    io.write_json(wdir / "agent" / "claims.json", state["claims"])
+    write_json(SessionPaths(state["session_id"]).claims_json, state["claims"])
     return {}
 
 
@@ -287,8 +292,12 @@ def build_graph():
     return g.compile()
 
 
-def run(session_id: str, subject_id: str = "", exemplars: list | None = None,
-        profile_summary: str = "") -> dict:
+def run(
+    session_id: str,
+    subject_id: str = "",
+    exemplars: list | None = None,
+    profile_summary: str = "",
+) -> dict:
     graph = build_graph()
     result = graph.invoke({
         "session_id": session_id,
@@ -296,4 +305,10 @@ def run(session_id: str, subject_id: str = "", exemplars: list | None = None,
         "exemplars": exemplars or [],
         "profile_summary": profile_summary,
     })
+    log.info(
+        "S4 done session=%s claims=%s llm_ok=%s",
+        session_id,
+        len(result.get("claims") or []),
+        result.get("llm_ok"),
+    )
     return result

@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from . import config
-from . import io
+from .core import io
 
 
 def generate(session_id: str, duration: float = 3000.0, seed: int = 42) -> dict:

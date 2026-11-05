@@ -6,23 +6,27 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from . import ids, io, schemas
-from . import config
+from .. import config, ids, schemas
+from ..core.io import read_json_optional, read_parquet_optional, write_json
+from ..core.logging_utils import get_logger
+from ..core.models import MediaInfo, StageReport
+from ..core.paths import SessionPaths
+
+log = get_logger(__name__)
 
 
-def run(session_id: str, media: dict, degrade: list[str] | None = None) -> dict:
-    wdir = config.session_dir(session_id)
+def run(session_id: str, media: MediaInfo, degrade: list[str] | None = None) -> StageReport:
+    paths = SessionPaths(session_id)
     duration = float(media["duration"])
     degrade = degrade or []
 
-    au = _load_visual(wdir)
-    voice = _load_voice(wdir)
-    text = _load_text(wdir)
+    au = read_parquet_optional(paths.au_parquet)
+    voice = read_json_optional(paths.voice_json, default=[]) or []
+    text = _load_text(paths)
 
     grid = _build_grid(duration, au, voice, text)
     baseline = _compute_baseline(grid)
@@ -30,35 +34,34 @@ def run(session_id: str, media: dict, degrade: list[str] | None = None) -> dict:
     grid = _mark_anomalies(grid, text)
 
     chunks = _grid_to_chunks(session_id, grid, duration)
-
     schemas.check_covers(chunks, lambda c: c["t0"], lambda c: c["t1"], duration)
+    write_json(paths.chunks_json, chunks)
 
-    io.write_json(wdir / "chunks" / "chunks.json", chunks)
-    return {"n_chunks": len(chunks), "n_anomaly": sum(1 for c in chunks if c["is_anomaly"]),
-            "baseline_available": baseline is not None}
+    report: StageReport = {
+        "ok": True,
+        "n_chunks": len(chunks),
+        "n_anomaly": sum(1 for c in chunks if c["is_anomaly"]),
+        "baseline_available": baseline is not None,
+        "degrade": list(degrade),
+    }
+    log.info(
+        "S2 done session=%s chunks=%s anomaly=%s baseline=%s",
+        session_id,
+        report["n_chunks"],
+        report["n_anomaly"],
+        report["baseline_available"],
+    )
+    return report
 
 
-# ---------------------------------------------------------------------------
-def _load_visual(wdir: Path) -> pd.DataFrame | None:
-    p = wdir / "face" / "au.parquet"
-    return pd.read_parquet(p) if p.exists() else None
-
-
-def _load_voice(wdir: Path) -> list:
-    p = wdir / "speech" / "voice.json"
-    return io.read_json(p) if p.exists() else []
-
-
-def _load_text(wdir: Path) -> list:
+def _load_text(paths: SessionPaths) -> list:
     """加载文本特征；兼容旧版缺 t0/t1 的 text_feat，用 transcript 补齐。"""
-    p = wdir / "text" / "text_feat.json"
-    feat = io.read_json(p) if p.exists() else []
+    feat = read_json_optional(paths.text_feat_json, default=[]) or []
     if not feat:
         return []
     if all(("t0" in x and "t1" in x) for x in feat):
         return feat
-    tp = wdir / "text" / "transcript.json"
-    transcript = io.read_json(tp) if tp.exists() else []
+    transcript = read_json_optional(paths.transcript_json, default=[]) or []
     by_id = {u.get("utt_id"): u for u in transcript}
     for x in feat:
         u = by_id.get(x.get("utt_id")) or {}

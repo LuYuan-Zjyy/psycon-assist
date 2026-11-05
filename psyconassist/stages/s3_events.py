@@ -5,10 +5,14 @@ severity 只由规则决定，LLM 无权改（硬规则 12）。
 """
 from __future__ import annotations
 
-from pathlib import Path
+from .. import ids
+from ..core.errors import ContractError
+from ..core.io import read_json, write_json
+from ..core.logging_utils import get_logger
+from ..core.models import MediaInfo, StageReport
+from ..core.paths import SessionPaths
 
-from . import config
-from . import ids, io
+log = get_logger(__name__)
 
 # severity 规则表（v1.1 §5.3）
 SEVERITY = {
@@ -19,17 +23,18 @@ SEVERITY = {
     "low_activation": "low",
 }
 
-TOOL_VERSION = "psyconassist-0.1.0"
+TOOL_VERSION = "psyconassist-0.2.0"
 
 
-def run(session_id: str, media: dict, baseline_available: bool = True) -> dict:
-    wdir = config.session_dir(session_id)
-    chunks = io.read_json(wdir / "chunks" / "chunks.json")
+def run(session_id: str, media: MediaInfo, baseline_available: bool = True) -> StageReport:
+    del media  # 时间边界已在 S2 chunks 内；保留签名便于编排层统一调用
+    paths = SessionPaths(session_id)
+    chunks = read_json(paths.chunks_json)
 
-    events = []
-    all_evidence = []
+    events: list[dict] = []
+    all_evidence: list[dict] = []
     ev_seq = 0
-    for i, c in enumerate(chunks):
+    for c in chunks:
         if not c.get("is_anomaly"):
             continue
         atype = c["anomaly_type"]
@@ -54,21 +59,23 @@ def run(session_id: str, media: dict, baseline_available: bool = True) -> dict:
             "evidence_ids": evidence_ids,
         })
 
-    # 校验：每个 event 至少 1 evidence
     for e in events:
-        assert e["evidence_ids"], f"event {e['event_id']} 无 evidence"
+        if not e["evidence_ids"]:
+            raise ContractError(f"event {e['event_id']} 无 evidence")
 
-    io.write_json(wdir / "events" / "events.json", events)
-    io.write_json(wdir / "events" / "evidence.json", all_evidence)
-    return {"n_events": len(events), "by_type": _count_by_type(events)}
+    write_json(paths.events_json, events)
+    write_json(paths.evidence_json, all_evidence)
+    by_type = _count_by_type(events)
+    log.info("S3 done session=%s events=%s by_type=%s", session_id, len(events), by_type)
+    return {"ok": True, "n_events": len(events), "by_type": by_type, "degrade": []}
 
 
 def _build_evidence(session_id: str, c: dict, start_seq: int) -> list[dict]:
     """为一个异常 chunk 生成 evidence（时间 + 指标 + 值 + 工具版本）。"""
-    evs = []
+    evs: list[dict] = []
     seq = start_seq
 
-    def add(metric: str, value, t0: float, t1: float):
+    def add(metric: str, value, t0: float, t1: float) -> None:
         nonlocal seq
         seq += 1
         evs.append({
@@ -94,7 +101,7 @@ def _build_evidence(session_id: str, c: dict, start_seq: int) -> list[dict]:
     return evs
 
 
-def _count_by_type(events: list[dict]) -> dict:
+def _count_by_type(events: list[dict]) -> dict[str, int]:
     d: dict[str, int] = {}
     for e in events:
         d[e["type"]] = d.get(e["type"], 0) + 1

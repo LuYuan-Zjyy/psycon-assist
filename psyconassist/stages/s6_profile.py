@@ -5,25 +5,29 @@ Agent 优化走 Prompt + RAG（不微调）。
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 
-from . import config
-from . import io
+from ..core.io import read_json, read_json_optional, write_json
+from ..core.logging_utils import get_logger
+from ..core.models import QualityReport
+from ..core.paths import SubjectPaths
+
+log = get_logger(__name__)
 
 
 def get_profile(subject_id: str) -> dict | None:
-    p = config.subject_dir(subject_id) / "profile.json"
-    if not p.exists():
-        return None
-    return io.read_json(p)
+    return read_json_optional(SubjectPaths(subject_id).profile_json)
 
 
-def update_profile(subject_id: str, session_id: str, chunks: list[dict], quality: dict) -> dict:
+def update_profile(
+    subject_id: str,
+    session_id: str,
+    chunks: list[dict],
+    quality: QualityReport | dict,
+) -> dict:
     """每场结束（S5 后）更新画像。幂等：同一 session 重复跑不重复计数。"""
-    sdir = config.subject_dir(subject_id)
-    sdir.mkdir(parents=True, exist_ok=True)
+    sp = SubjectPaths(subject_id)
+    sp.ensure_layout()
     p = get_profile(subject_id) or {
         "subject_id": subject_id,
         "n_sessions": 0,
@@ -37,7 +41,6 @@ def update_profile(subject_id: str, session_id: str, chunks: list[dict], quality
     if session_id in p["sessions"]:
         return p  # 幂等：已计入，直接返回
 
-    # 本场 VA 统计
     vs = [c["va"]["v"] for c in chunks if c.get("va") and c["va"].get("v") is not None]
     as_ = [c["va"]["a"] for c in chunks if c.get("va") and c["va"].get("a") is not None]
     new_base = {
@@ -47,7 +50,6 @@ def update_profile(subject_id: str, session_id: str, chunks: list[dict], quality
         "a_sd": float(np.std(as_)) if as_ else None,
     }
 
-    # 与历史合并（简单按场次加权平均）
     prev_n = p["n_sessions"]
     if prev_n == 0:
         p["baseline"] = new_base
@@ -65,7 +67,13 @@ def update_profile(subject_id: str, session_id: str, chunks: list[dict], quality
     p["comparability"] = _comparability(p["n_sessions"], quality)
     p["last_updated"] = session_id
 
-    io.write_json(sdir / "profile.json", p)
+    write_json(sp.profile_json, p)
+    log.info(
+        "S6 profile subject=%s n_sessions=%s comparability=%s",
+        subject_id,
+        p["n_sessions"],
+        p["comparability"],
+    )
     return p
 
 
@@ -76,29 +84,29 @@ def _comparability(n_sessions: int, quality: dict) -> float:
     score = 0.0
     n = 0
     if "face_cov" in quality and quality["face_cov"] is not None:
-        score += quality["face_cov"]; n += 1
+        score += quality["face_cov"]
+        n += 1
     if "asr_ok" in quality:
-        score += 1.0 if quality["asr_ok"] else 0.0; n += 1
+        score += 1.0 if quality["asr_ok"] else 0.0
+        n += 1
     if "diarization_ok" in quality:
-        score += 1.0 if quality["diarization_ok"] else 0.0; n += 1
+        score += 1.0 if quality["diarization_ok"] else 0.0
+        n += 1
     return round(score / n, 4) if n else 0.0
 
 
 def _count_exemplars(subject_id: str) -> int:
-    edir = config.subject_dir(subject_id) / "exemplars"
+    edir = SubjectPaths(subject_id).exemplars_dir
     if not edir.exists():
         return 0
     return len(list(edir.glob("*.json")))
 
 
 def load_exemplars(subject_id: str) -> list[dict]:
-    edir = config.subject_dir(subject_id) / "exemplars"
+    edir = SubjectPaths(subject_id).exemplars_dir
     if not edir.exists():
         return []
-    out = []
-    for f in sorted(edir.glob("*.json")):
-        out.append(io.read_json(f))
-    return out
+    return [read_json(f) for f in sorted(edir.glob("*.json"))]
 
 
 def profile_summary(profile: dict | None) -> str:

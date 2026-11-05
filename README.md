@@ -2,9 +2,16 @@
 
 **An auditable session-analysis assistant for psychological counseling.**
 
-Most "AI therapist" demos optimise for sounding empathetic. PsyConAssist optimises for **not over-claiming**: every observation is tied to evidence in the session, severity is decided by rules rather than by a language model, and anything the model is allowed to say is constrained by an explicit rule set.
+Most "AI therapist" demos optimise for sounding empathetic. PsyConAssist optimises for **not over-claiming**: every observation is tied to evidence, severity is decided by rules rather than by a language model, and the model is only reachable at two explicitly named nodes.
 
-[中文说明](README.zh-CN.md)
+[中文说明](README.zh-CN.md) · [Pipeline & TODO](TODO.md)
+
+[![license](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](requirements.txt)
+[![FastAPI](https://img.shields.io/badge/FastAPI-web%20app-009688?logo=fastapi&logoColor=white)](psyconassist/webapp.py)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+> ⚠️ Research prototype. **Not** a diagnostic device and not a substitute for clinical judgement.
 
 ---
 
@@ -13,48 +20,59 @@ Most "AI therapist" demos optimise for sounding empathetic. PsyConAssist optimis
 A counseling assistant that invents a diagnosis, or infers "the client feels abandoned" from a pause, is worse than useless. Two properties matter more than fluency:
 
 1. **Traceability** — every event points back to the transcript / frame / audio segment it came from.
-2. **Restraint** — the system must be able to say "not enough evidence" instead of guessing.
+2. **Restraint** — the system must be able to say "not available" instead of guessing.
 
-PsyConAssist enforces both in the architecture: a rule engine owns severity and admissibility, an LLM is only reachable at two named nodes, and the feedback loop uses six fixed reason codes rather than free text.
+PsyConAssist enforces both in the architecture: a rule engine owns severity and admissibility, the LLM is only reachable at two named nodes, and the feedback loop uses six fixed reason codes rather than free text.
 
-> ⚠️ This is a research prototype. It is **not** a diagnostic device and must not be used as a substitute for clinical judgement.
+## Design principles
+
+| Principle | Meaning |
+| :-- | :-- |
+| Evidence-traceable | Every claim carries `evidence_ids`; time can be replayed back to the recording |
+| Missing means "unavailable" | Failed modality writes `null` / `degrade` — never silently fills a zero |
+| File-based stages | S0–S6 communicate through `data/<session_id>/`, no hidden in-memory hand-off |
+| Limited LLM authority | LLM may only run at `synth` / `risk`; `severity` is decided by rules and cannot be changed |
+| Comparability guard | `comparability < 0.7` → no cross-session conclusion |
 
 ## Pipeline
 
-| Stage | Module | What it does |
+| Stage | Module | In → Out |
 | :-- | :-- | :-- |
-| **S0** Ingest | `s0_ingest.py` | Normalise the session video, extract audio, detect the client's voice sample |
-| **S1** Signals | `s1_text.py`, `s1_visual.py`, `s1_voice.py` | ASR transcript, facial action units (OpenFace), acoustic features + speaker separation |
-| **S2** Chunking | `s2_chunk.py` | Segment the session into time-aligned chunks |
-| **S3** Events | `s3_events.py` | Anomalous chunks → events with evidence; **severity from a rule table, not the LLM** |
-| **S4** Agent | `s4_agent.py` | LangGraph state machine (12 nodes) with **23 hard rules**; the LLM is only allowed at `synth` and `risk` review |
-| **S5** Feedback | `s5_feedback.py` | Clinician accept / edit / reject + one of six fixed reason codes; exemplars flow back |
-| **S6** Profile | `s6_profile.py` | Cross-session client profile, with a comparability guard (`< 0.7` → no cross-session conclusion) |
+| **S0** Ingest | `stages/s0_ingest.py` | video → normalised `raw/norm.mp4` + `audio/16k.wav` |
+| **S1** Signals | `stages/s1_text.py` · `s1_visual.py` · `s1_voice.py` | audio → transcript; video → AU table; audio → acoustic features, speaker roles |
+| **S2** Chunking | `stages/s2_chunk.py` | signals → time-aligned `chunks/chunks.json` (VA per chunk) |
+| **S3** Events | `stages/s3_events.py` | anomalous chunks → `events/events.json` + `events/evidence.json`; **severity from a rule table** |
+| **S4** Agent | `stages/s4_agent.py` | events → `agent/claims.json`; LangGraph state machine with 23 hard rules |
+| **S5** Feedback | `stages/s5_feedback.py` | claim + clinician action → `feedback/feedback.json`, exemplars |
+| **S6** Profile | `stages/s6_profile.py` | sessions → `subjects/<id>/profile.json`, comparability-weighted |
 
-## Architecture
+Shared infrastructure lives in `core/`:
+
+| Module | Responsibility |
+| :-- | :-- |
+| `core/paths.py` | `SessionPaths` / `SubjectPaths` — one place that knows the layout |
+| `core/io.py` | atomic JSON read/write, optional reads |
+| `core/errors.py` | `StageError` and friends |
+| `core/logging_utils.py` | one logger factory |
+| `core/models.py` | shared dataclasses / typed dicts |
 
 ```mermaid
 flowchart LR
-    V["Session video"] --> S0["S0 · ingest<br/>ffmpeg"]
-    S0 --> S1A["S1 · text<br/>ASR"]
-    S0 --> S1B["S1 · visual<br/>OpenFace"]
-    S0 --> S1C["S1 · voice<br/>acoustic + diarisation"]
-
-    S1A --> S2["S2 · chunking"]
+    V["Session video"] --> S0["S0 ingest<br/>ffmpeg"]
+    S0 --> S1A["S1 text<br/>ASR"]
+    S0 --> S1B["S1 visual<br/>OpenFace"]
+    S0 --> S1C["S1 voice<br/>acoustic + diarisation"]
+    S1A --> S2["S2 chunking"]
     S1B --> S2
     S1C --> S2
-
-    S2 --> S3["S3 · events<br/>rule-based severity"]
-    S3 --> S4["S4 · agent<br/>LangGraph · 23 hard rules"]
-    S4 --> S5["S5 · feedback<br/>accept / edit / reject"]
-    S5 --> S6["S6 · profile<br/>comparability guard"]
-
+    S2 --> S3["S3 events<br/>rule-based severity"]
+    S3 --> S4["S4 agent<br/>LangGraph · 23 rules"]
+    S4 --> S5["S5 feedback<br/>accept / edit / reject"]
+    S5 --> S6["S6 profile<br/>comparability guard"]
     S4 -.->|only at synth / risk| LLM[("LLM")]
-    S6 --> UI["FastAPI + web UI"]
-    S5 --> UI
+    S5 --> UI["FastAPI + web UI"]
+    S6 --> UI
 ```
-
-Every heavy engine is optional. If `ffmpeg`, OpenFace, `pyannote` or Whisper are missing, the pipeline **degrades explicitly** and marks those signals as unavailable — it never silently fabricates them.
 
 ## Quickstart
 
@@ -63,53 +81,50 @@ git clone https://github.com/LuYuan-Zjyy/psycon-assist.git
 cd psycon-assist
 pip install -r requirements.txt
 
-# run the whole pipeline on synthetic data — no video, no heavy models
+# whole pipeline on synthetic data — no video, no heavy models
 python -m psyconassist.cli demo --subject P-0001 --duration 3000
 
-# web UI
-python -m psyconassist.webapp      # http://localhost:8000
+# web UI (binds 127.0.0.1:8100 and opens a browser)
+python -m psyconassist.webapp
 ```
 
-Real session video (needs `ffmpeg` + the optional engines):
+Real session video needs `ffmpeg` on PATH plus optional engines:
 
 ```bash
 python -m psyconassist.cli run --video session.mp4 --subject P-0001 --client-sample 12.4 15.4
 ```
 
-`--client-sample` is the time window that contains the client's voice only; it is used to build the speaker reference.
+`--client-sample` is the time window containing the client's voice only; it builds the speaker reference. Missing engines degrade explicitly and are reported in `quality.json`.
 
-Create `.env` from `.env.example` and set `DS_API_KEY` (any OpenAI-compatible endpoint works — `LLM_BASE_URL` / `LLM_MODEL`).
+Configuration comes from `.env` (see `.env.example`): `DS_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL`, optional `PSY_DATA_ROOT`, `PSY_MAX_UPLOAD_MB`, `OPENFACE_BIN`, `FFMPEG_BIN`.
 
-## Design rules worth knowing
+## Security notes
 
-- **Severity is not a model output.** The rule table in `s3_events.py` decides `high / medium / low`; the LLM cannot upgrade or downgrade it.
-- **The LLM has two doors.** Only `synth` and `risk` nodes may call a model; every other node is deterministic.
-- **Deleting beats rewriting.** When a validation check fails, the sentence is dropped rather than regenerated (rule 16).
-- **Feedback is structured.** Six reason codes, no free text, so the exemplar bank stays queryable.
-- **Cross-session claims need comparability.** Below `0.7` comparability the system refuses to draw cross-session conclusions.
+- **Session / subject IDs are validated** before being used as path components — `../` cannot escape `data/`.
+- **Uploads are capped** (`PSY_MAX_UPLOAD_MB`, default 2048) and restricted to a video-extension allowlist; oversized files are deleted immediately.
+- **The web app binds to `127.0.0.1` only** and serves the frontend from `psyconassist/web`, never from `data/`.
+- **No session content is logged**; logs carry IDs and stage names.
+- Never commit `.env`, recordings, transcripts, or profiles — `data/` is git-ignored.
 
 ## Project layout
 
 ```
-psyconassist/        pipeline stages (s0–s6), agent, config, FastAPI app
-psyconassist/web/    static frontend (vanilla JS)
-requirements.txt     runtime dependencies
-pyproject.toml       packaging + console entry point
+psyconassist/            package
+  core/                  paths, io, errors, logging, models
+  stages/                s0 … s6 (the pipeline)
+  engine/                ffmpeg / OpenFace / pyannote / whisper wrappers
+  web/                   static frontend
+  cli.py, webapp.py      entry points
+TODO.md                  pipeline walk-through + prioritised backlog
 ```
-
-Data lives under `./data` by default (`PSY_DATA_ROOT` to override) and is git-ignored.
 
 ## Roadmap
 
-- [ ] **Rule coverage tests**: one synthetic fixture per hard rule, asserting the rule actually fires.
-- [ ] **English prompt set** for the two LLM nodes.
-- [ ] **Event timeline UI**: scrub the session and see events aligned to the video.
-- [ ] **Export report** (Markdown / PDF) for supervision sessions.
-- [ ] **Adapter for a second ASR engine** to prove the signal layer is pluggable.
+See [TODO.md](TODO.md) for the prioritised backlog (rule fixtures, English prompts, timeline UI, report export, second ASR engine).
 
 ## Contributing
 
-Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Please never commit session data, transcripts, or API keys.
+Issues and PRs welcome — read [CONTRIBUTING.md](CONTRIBUTING.md) first. Please never commit session data or API keys.
 
 ## License
 

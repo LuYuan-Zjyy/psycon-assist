@@ -15,8 +15,14 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, io, s5_feedback, s6_profile, pipeline, ids
+from . import config, ids, pipeline
+from .core.errors import StageError
+from .core.io import read_json_optional, write_json
+from .core.logging_utils import get_logger
+from .core.paths import SessionPaths, SubjectPaths
+from .stages import s5_feedback, s6_profile
 
+log = get_logger(__name__)
 app = FastAPI(title="PsyConAssist", version="0.1.0")
 
 
@@ -41,6 +47,27 @@ config.DATA_ROOT.joinpath("uploads").mkdir(parents=True, exist_ok=True)
 TASKS: dict[str, dict] = {}
 _TASKS_LOCK = threading.Lock()
 
+# 允许的上传扩展名（保存为 uploads/<task_id><ext>，扩展名必须来自白名单）
+ALLOWED_VIDEO_EXT = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".flv", ".wmv", ".ts", ".mpeg", ".mpg"}
+
+
+def _safe_session(session_id: str) -> SessionPaths:
+    """校验 session_id 后再构造路径，避免 `../` 穿越到 data/ 之外。"""
+    try:
+        config.session_dir(session_id)
+    except ValueError:
+        raise HTTPException(404, "session 不存在")
+    return SessionPaths(session_id)
+
+
+def _safe_subject(subject_id: str) -> SubjectPaths:
+    try:
+        config.subject_dir(subject_id)
+    except ValueError:
+        raise HTTPException(400, "subject_id 格式无效（应形如 P-0001）")
+    return SubjectPaths(subject_id)
+
+
 
 # ---------------------------------------------------------------------------
 # 数据读取
@@ -60,16 +87,17 @@ def _list_subjects() -> list[str]:
 
 
 def _session_summary(session_id: str) -> dict:
-    wdir = config.session_dir(session_id)
-    media = io.read_json(wdir / "media.json") if (wdir / "media.json").exists() else {}
-    events = io.read_json(wdir / "events" / "events.json") if (wdir / "events" / "events.json").exists() else []
-    claims = io.read_json(wdir / "agent" / "claims.json") if (wdir / "agent" / "claims.json").exists() else []
-    fb = io.read_json(wdir / "feedback" / "feedback.json") if (wdir / "feedback" / "feedback.json").exists() else []
+    p = SessionPaths(session_id)
+    media = read_json_optional(p.media_json, default={}) or {}
+    events = read_json_optional(p.events_json, default=[]) or []
+    claims = read_json_optional(p.claims_json, default=[]) or []
+    fb = read_json_optional(p.feedback_json, default=[]) or []
+    chunks = read_json_optional(p.chunks_json, default=[]) or []
     return {
         "session_id": session_id,
         "duration": media.get("duration"),
         "has_video": bool(media.get("normalized_path") and Path(media["normalized_path"]).exists()),
-        "n_chunks": len(io.read_json(wdir / "chunks" / "chunks.json")) if (wdir / "chunks" / "chunks.json").exists() else 0,
+        "n_chunks": len(chunks),
         "n_events": len(events),
         "n_claims": len(claims),
         "n_feedback": len(fb),
@@ -109,7 +137,9 @@ def _run_pipeline_task(task_id: str, video_path: Path, subject_id: str,
         with _TASKS_LOCK:
             TASKS[task_id]["status"] = "done"
             TASKS[task_id]["summary"] = summary
+        log.info("task %s done session=%s", task_id, session_id)
     except Exception as e:  # noqa: BLE001
+        log.exception("task %s failed", task_id)
         with _TASKS_LOCK:
             TASKS[task_id]["status"] = "failed"
             TASKS[task_id]["error"] = str(e)
@@ -126,13 +156,26 @@ async def upload_video(
     if client_t1 <= client_t0:
         raise HTTPException(400, "声音样本时间段无效：client_t1 必须大于 client_t0")
 
-    # 保存上传文件
-    ext = Path(video.filename or "video.mp4").suffix or ".mp4"
+    # 路径与格式校验（subject_id 会被拼进落盘路径）
+    _safe_subject(subject_id)
+    ext = Path(video.filename or "").suffix.lower() or ".mp4"
+    if ext not in ALLOWED_VIDEO_EXT:
+        raise HTTPException(400, f"不支持的视频格式：{ext}")
+
+    # 保存上传文件（带体积上限，超限立即中止并删除半成品）
     task_id = uuid.uuid4().hex[:12]
     save_path = config.DATA_ROOT / "uploads" / f"{task_id}{ext}"
+    max_bytes = config.MAX_UPLOAD_MB * 1024 * 1024
+    written = 0
     with open(save_path, "wb") as f:
         while chunk := await video.read(1024 * 1024):
+            written += len(chunk)
+            if written > max_bytes:
+                break
             f.write(chunk)
+    if written > max_bytes:
+        save_path.unlink(missing_ok=True)
+        raise HTTPException(413, f"文件超过上限 {config.MAX_UPLOAD_MB} MB")
 
     with _TASKS_LOCK:
         TASKS[task_id] = {
@@ -178,19 +221,19 @@ def overview():
 
 @app.get("/api/sessions/{session_id}")
 def session_detail(session_id: str):
-    wdir = config.session_dir(session_id)
-    if not wdir.exists():
+    p = _safe_session(session_id)
+    if not p.root.exists():
         raise HTTPException(404, "session 不存在")
-    media = io.read_json(wdir / "media.json") if (wdir / "media.json").exists() else {}
-    quality = io.read_json(wdir / "quality.json") if (wdir / "quality.json").exists() else {}
-    chunks = io.read_json(wdir / "chunks" / "chunks.json") if (wdir / "chunks" / "chunks.json").exists() else []
-    events = io.read_json(wdir / "events" / "events.json") if (wdir / "events" / "events.json").exists() else []
-    claims = io.read_json(wdir / "agent" / "claims.json") if (wdir / "agent" / "claims.json").exists() else []
-    feedback = io.read_json(wdir / "feedback" / "feedback.json") if (wdir / "feedback" / "feedback.json").exists() else []
-    transcript = io.read_json(wdir / "text" / "transcript.json") if (wdir / "text" / "transcript.json").exists() else []
-    text_feat = io.read_json(wdir / "text" / "text_feat.json") if (wdir / "text" / "text_feat.json").exists() else []
-    voice = io.read_json(wdir / "speech" / "voice.json") if (wdir / "speech" / "voice.json").exists() else []
-    evidence = io.read_json(wdir / "events" / "evidence.json") if (wdir / "events" / "evidence.json").exists() else []
+    media = read_json_optional(p.media_json, default={}) or {}
+    quality = read_json_optional(p.quality_json, default={}) or {}
+    chunks = read_json_optional(p.chunks_json, default=[]) or []
+    events = read_json_optional(p.events_json, default=[]) or []
+    claims = read_json_optional(p.claims_json, default=[]) or []
+    feedback = read_json_optional(p.feedback_json, default=[]) or []
+    transcript = read_json_optional(p.transcript_json, default=[]) or []
+    text_feat = read_json_optional(p.text_feat_json, default=[]) or []
+    voice = read_json_optional(p.voice_json, default=[]) or []
+    evidence = read_json_optional(p.evidence_json, default=[]) or []
 
     # VA 时间线（供图表）
     timeline = []
@@ -229,6 +272,7 @@ def session_detail(session_id: str):
 
 @app.get("/api/subjects/{subject_id}")
 def subject_profile(subject_id: str):
+    _safe_subject(subject_id)
     profile = s6_profile.get_profile(subject_id)
     if profile is None:
         raise HTTPException(404, "subject 不存在")
@@ -255,22 +299,23 @@ def submit_feedback(session_id: str, body: FeedbackBody):
             reason=body.reason, revised_text=body.revised_text,
             subject_id=body.subject_id,
         )
-    except (KeyError, AssertionError) as e:
+    except (KeyError, StageError, AssertionError) as e:
         raise HTTPException(400, str(e))
     # 刷新画像 exemplars_count
     if body.subject_id:
+        sp = _safe_subject(body.subject_id)
         p = s6_profile.get_profile(body.subject_id)
         if p:
             p["exemplars_count"] = len(s6_profile.load_exemplars(body.subject_id))
-            io.write_json(config.subject_dir(body.subject_id) / "profile.json", p)
+            write_json(sp.profile_json, p)
     stats = s5_feedback.stats(session_id)
     return {"feedback": fb, "stats": stats}
 
 
 @app.get("/media/{session_id}/norm.mp4")
 def video(session_id: str):
-    wdir = config.session_dir(session_id)
-    media = io.read_json(wdir / "media.json") if (wdir / "media.json").exists() else {}
+    sp = _safe_session(session_id)
+    media = read_json_optional(sp.media_json, default={}) or {}
     p = media.get("normalized_path")
     if not p or not Path(p).exists():
         raise HTTPException(404, "无可用视频")

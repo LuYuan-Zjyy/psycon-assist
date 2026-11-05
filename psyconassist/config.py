@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -41,10 +42,21 @@ BASELINE_WINDOW = 8 * 60  # 前 8 分钟
 BASELINE_MIN = 3 * 60     # 基线最小可用时长
 COMPARABILITY_THRESHOLD = 0.7
 
+# ---- 上传限制 ----
+MAX_UPLOAD_MB = int(os.getenv("PSY_MAX_UPLOAD_MB", "2048"))
+
+# ---- ID 校验（防止路径穿越：所有落盘路径都必须经过 session_dir / subject_dir）----
+_SESSION_ID_RE = re.compile(r"^S\d{8}-\d{3}$")
+_SUBJECT_ID_RE = re.compile(r"^P-?\d{1,6}$")
+
 
 def session_dir(session_id: str) -> Path:
+    if not _SESSION_ID_RE.match(session_id or ""):
+        raise ValueError(f"invalid session_id: {session_id!r}")
     return DATA_ROOT / session_id
 
 
 def subject_dir(subject_id: str) -> Path:
+    if not _SUBJECT_ID_RE.match(subject_id or ""):
+        raise ValueError(f"invalid subject_id: {subject_id!r}")
     return SUBJECTS_DIR / subject_id
