@@ -46,8 +46,11 @@ COMPARABILITY_THRESHOLD = 0.7
 MAX_UPLOAD_MB = int(os.getenv("PSY_MAX_UPLOAD_MB", "2048"))
 
 # ---- ID 校验（防止路径穿越：所有落盘路径都必须经过 session_dir / subject_dir）----
+# session id 由代码生成，格式固定；subject id 由用户输入（P-0001 / CI-0001 / subj_01），
+# 只限制为安全的路径片段：字母数字开头，仅含字母/数字/下划线/连字符，长度 <= 32，
+# 从而杜绝 "/"、"\\"、"."、".."、空格 等穿越字符。
 _SESSION_ID_RE = re.compile(r"^S\d{8}-\d{3}$")
-_SUBJECT_ID_RE = re.compile(r"^P-?\d{1,6}$")
+_SUBJECT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 
 
 def session_dir(session_id: str) -> Path:

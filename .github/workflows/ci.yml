@@ -32,6 +32,8 @@ jobs:
           python-version: "3.11"
       - name: Install minimal runtime deps
         run: |
-          pip install numpy pandas pyarrow python-dotenv fastapi uvicorn langgraph langchain-core openai
+          pip install numpy pandas pyarrow python-dotenv fastapi uvicorn langgraph langchain-core openai pytest
+      - name: Unit tests (id validation)
+        run: python -m pytest tests -q
       - name: Run the synthetic pipeline (no video, no LLM key required)
         run: python -m psyconassist.cli demo --subject CI-0001 --duration 300

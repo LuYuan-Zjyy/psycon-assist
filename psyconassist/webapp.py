@@ -65,7 +65,7 @@ def _safe_subject(subject_id: str) -> SubjectPaths:
     try:
         config.subject_dir(subject_id)
     except ValueError:
-        raise HTTPException(400, "subject_id 格式无效（应形如 P-0001）")
+        raise HTTPException(400, "subject_id 只能包含字母、数字、下划线和连字符（如 P-0001）")
     return SubjectPaths(subject_id)
 
 
