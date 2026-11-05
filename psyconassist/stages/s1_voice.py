@@ -52,6 +52,9 @@ def run(session_id: str, media: MediaInfo) -> StageReport:
     for s in raw_segs:
         item = dict(s)
         item["role"] = role_map.get(s.get("speaker_id"), "unknown")
+        if not diarize_ok:
+            # 没做说话人分离就不该声称知道谁是来访者
+            item["role"] = "unknown"
         segs.append(item)
 
     features = aco.segment_features(wav, segs) if aco.available() else segs

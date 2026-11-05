@@ -137,8 +137,9 @@ def _synth(state: State) -> dict:
             return {"claims": claims, "llm_ok": True}
     # fallback：规则模板
     claims = []
+    role_known = bool((state.get("quality") or {}).get("diarization_ok"))
     for i, e in enumerate(events):
-        text = _template_claim(e, evidence)
+        text = _template_claim(e, evidence, role_known)
         claims.append({
             "sid": ids.claim_id(state["session_id"], i + 1),
             "event_id": e["event_id"],
@@ -201,14 +202,30 @@ def _synth_llm(state: State) -> list[dict]:
     return claims
 
 
-def _template_claim(e: dict, evidence: dict) -> str:
+def _template_claim(e: dict, evidence: dict, role_known: bool = False) -> str:
+    """按「实际存在的证据」选措辞：没有面部数据就不提面部。"""
     t0 = _fmt_mmss(e["t0"])
     t1 = _fmt_mmss(e["t1"])
+    metrics = {
+        evidence[eid].get("metric")
+        for eid in e.get("evidence_ids", [])
+        if eid in evidence
+    }
+    has_face = "va.v" in metrics
+    has_arousal = "va.a" in metrics
+    who = "来访者" if role_known else "该段说话人"
+
+    if e["type"] == "va_shift":
+        if has_face and has_arousal:
+            return f"{t0}–{t1} 效价与唤醒相对本场基线同时偏离。"
+        if has_face:
+            return f"{t0}–{t1} 效价相对本场基线出现明显波动。"
+        return f"{t0}–{t1} 唤醒水平相对本场基线出现明显波动。"
     type_map = {
-        "va_shift": f"{t0}–{t1} 面部效价出现明显波动（相对本场基线）。",
-        "silence": f"{t0}–{t1} 来访者回应时延较长或发声占比偏低。",
+        "text_shift": f"{t0}–{t1} 文本情绪相对本场基线走低。",
+        "silence": f"{t0}–{t1} {who}回应时延较长或发声占比偏低。",
         "risk": f"{t0}–{t1} 检出风险词，原文已记录，供进一步关注。",
-        "incongruence": f"{t0}–{t1} 文本极性与面部效价方向不一致。",
+        "incongruence": f"{t0}–{t1} 文本极性与效价方向不一致。",
         "low_activation": f"{t0}–{t1} 唤醒水平相对本场基线偏低。",
     }
     return type_map.get(e["type"], f"{t0}–{t1} 检测到需要关注的时刻。")
@@ -226,6 +243,11 @@ def _validator(state: State) -> dict:
         text = c.get("text", "")
         if any(w in text for w in DIAGNOSIS_WORDS + INFERENCE_WORDS):
             ok = False
+        # 硬规则：提到面部/表情/效价，就必须有面部来源的证据
+        if any(w in text for w in ("面部", "表情", "效价")):
+            metrics = {evidence[eid].get("metric") for eid in eids if eid in evidence}
+            if "va.v" not in metrics:
+                ok = False
         if not re.search(r"\d{2}:\d{2}", text):
             ok = False
         if ok:

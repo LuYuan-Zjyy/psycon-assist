@@ -18,6 +18,7 @@ log = get_logger(__name__)
 SEVERITY = {
     "va_shift": "high",
     "risk": "high",
+    "text_shift": "medium",
     "silence": "medium",
     "incongruence": "medium",
     "low_activation": "low",

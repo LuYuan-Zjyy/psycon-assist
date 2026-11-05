@@ -18,6 +18,20 @@ def available() -> bool:
         return False
 
 
+def _resolve_model_path(model_size: str, download_root: str) -> str:
+    """模型已在缓存里就直接用快照目录，避免每次跑都要连 Hugging Face。"""
+    if "/" in model_size or Path(model_size).exists():
+        return model_size
+    repo = f"Systran/faster-whisper-{model_size}"
+    cache = Path(download_root) / ("models--" + repo.replace("/", "--"))
+    snaps = cache / "snapshots"
+    if snaps.exists():
+        for snap in sorted(snaps.iterdir(), reverse=True):
+            if (snap / "model.bin").exists():
+                return str(snap)
+    return model_size
+
+
 def _run(model, sig, language):
     """Force the generator so CUDA/library errors surface here (not in the caller)."""
     segments, info = model.transcribe(sig, language=language, word_timestamps=True)
@@ -43,8 +57,9 @@ def transcribe(wav: Path, model_size: str = "small", language: str = "zh") -> li
         sr = SAMPLE_RATE
 
     download_root = os.environ.get("WHISPER_CACHE", "/public_data/hf_cache/whisper")
+    resolved = _resolve_model_path(model_size, download_root)
     model = WhisperModel(
-        model_size,
+        resolved,
         device="auto",
         compute_type="int8_float16",
         download_root=download_root,
@@ -57,7 +72,7 @@ def transcribe(wav: Path, model_size: str = "small", language: str = "zh") -> li
             raise
         log.warning("CUDA 推理不可用（%s），回退 CPU int8", exc)
         model = WhisperModel(
-            model_size,
+            resolved,
             device="cpu",
             compute_type="int8",
             download_root=download_root,

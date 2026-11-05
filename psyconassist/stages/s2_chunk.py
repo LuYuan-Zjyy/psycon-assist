@@ -123,7 +123,9 @@ def _face_va(au, t0: float, t1: float):
 def _voice_va(voice: list, t0: float, t1: float):
     if not voice:
         return None, None, 0.0
-    client = [s for s in voice if s.get("role") == "client" and s["t1"] > t0 and s["t0"] < t1]
+    # 未做说话人分离时 role=unknown：此时把全部语音当作同一说话人，
+    # 否则会误判为整场沉默（claim 措辞仍会标明角色未知）
+    client = [s for s in voice if s.get("role") in ("client", "unknown") and s["t1"] > t0 and s["t0"] < t1]
     if not client:
         return None, None, 0.0
     cov = sum(min(t1, s["t1"]) - max(t0, s["t0"]) for s in client) / max(t1 - t0, 1e-9)
@@ -233,8 +235,9 @@ def _mark_anomalies(grid: list[dict], text: list) -> list[dict]:
                 g["anom"].append("low_activation")
         if pol_mean is not None and pol_sd is not None and g.get("text_v") is not None:
             # 相对本场更低落的文本段（哪怕绝对极性仍为正）
+            # 这是文本情绪变化，不是面部效价——单独一类，避免无脸时伪造视觉结论
             if (g["text_v"] - pol_mean) / pol_sd < -1.2:
-                g["anom"].append("va_shift")
+                g["anom"].append("text_shift")
         if g.get("text_v") is not None and g.get("va_v") is not None:
             if (g["text_v"] > 0.2 and g["va_v"] < -0.2) or (g["text_v"] < -0.2 and g["va_v"] > 0.2):
                 g["anom"].append("incongruence")
@@ -337,7 +340,7 @@ def _merge_close(segs: list, grid: list) -> list:
 
 
 def _pick_type(types: set) -> str:
-    order = ["risk", "va_shift", "silence", "incongruence", "low_activation"]
+    order = ["risk", "va_shift", "text_shift", "silence", "incongruence", "low_activation"]
     for t in order:
         if t in types:
             return t
