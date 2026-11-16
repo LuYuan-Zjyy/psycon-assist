@@ -79,6 +79,10 @@ class SessionPaths:
         return self.root / "agent" / "claims.json"
 
     @property
+    def dropped_json(self) -> Path:
+        return self.root / "agent" / "dropped.json"
+
+    @property
     def feedback_json(self) -> Path:
         return self.root / "feedback" / "feedback.json"
 

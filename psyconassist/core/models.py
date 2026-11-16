@@ -9,7 +9,7 @@ from typing import Any, Literal, TypedDict
 
 Role = Literal["client", "counselor", "unknown"]
 AnomalyType = Literal[
-    "normal", "risk", "va_shift", "silence", "incongruence", "low_activation"
+    "normal", "risk", "va_shift", "text_shift", "silence", "incongruence", "low_activation"
 ]
 Severity = Literal["high", "medium", "low"]
 ClaimState = Literal["pending", "accept", "edit", "reject"]

@@ -39,9 +39,8 @@ def run(session_id: str, media: MediaInfo, baseline_available: bool = True) -> S
         if not c.get("is_anomaly"):
             continue
         atype = c["anomaly_type"]
-        # 基线不可得：保留不依赖跨次基线的类型（短视频/无脸常见）
-        if not baseline_available and atype not in ("risk", "silence", "low_activation", "va_shift"):
-            continue
+        # 基线不可得时 S2 已只会产出不依赖基线的类型（va_shift/low_activation 依赖
+        # z 分，无基线时不会出现）；此处不再二次过滤，避免误删 text_shift/incongruence。
 
         evidence_ids = []
         for ev in _build_evidence(session_id, c, ev_seq):
@@ -97,6 +96,11 @@ def _build_evidence(session_id: str, c: dict, start_seq: int) -> list[dict]:
     txt = c.get("text") or {}
     if txt.get("polarity") is not None:
         add("polarity", round(txt["polarity"], 4), c["t0"], c["t1"])
+    trig = c.get("trigger") or {}
+    if trig.get("z_v") is not None:
+        add("z_v", round(trig["z_v"], 3), c["t0"], c["t1"])
+    if trig.get("z_a") is not None:
+        add("z_a", round(trig["z_a"], 3), c["t0"], c["t1"])
     if c.get("all_types"):
         add("anomaly_types", c["all_types"], c["t0"], c["t1"])
     return evs
