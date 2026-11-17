@@ -129,6 +129,35 @@ def _parse_openface(csv: Path, fps: float) -> pd.DataFrame:
     return df[keep].copy()
 
 
+def _write_frontend_json(paths: SessionPaths, df: pd.DataFrame, session_id: str) -> None:
+    """输出逐帧 VA 与人脸框，供前端叠加与同步（失败不影响主流程）。"""
+    try:
+        from ..core.io import write_json
+
+        face_dir = paths.root / "face"
+        face_dir.mkdir(parents=True, exist_ok=True)
+        va_series, boxes = [], []
+        for r in df.itertuples(index=False):
+            va_series.append({
+                "ts": float(r.ts),
+                "v": None if pd.isna(r.va_v) else round(float(r.va_v), 4),
+                "a": None if pd.isna(r.va_a) else round(float(r.va_a), 4),
+            })
+            box = None
+            x0 = getattr(r, "x0", None)
+            if x0 is not None and not pd.isna(x0):
+                box = [int(r.x0), int(r.y0), int(r.x1), int(r.y1)]
+            boxes.append({
+                "ts": float(r.ts),
+                "box": box,
+                "conf": None if pd.isna(r.conf) else round(float(r.conf), 4),
+            })
+        write_json(face_dir / "va_series.json", va_series)
+        write_json(face_dir / "face_boxes.json", boxes)
+    except Exception:
+        log.warning("S1A 写出前端 JSON 失败 session=%s", session_id)
+
+
 def _run_face_va(session_id: str, media: MediaInfo) -> StageReport:
     """EmotiEffLib 路径：抽帧 → MTCNN 检测 → VA + 离散表情 → face/va.parquet。"""
     paths = SessionPaths(session_id)
@@ -146,6 +175,7 @@ def _run_face_va(session_id: str, media: MediaInfo) -> StageReport:
         }
 
     write_parquet(paths.va_parquet, df)
+    _write_frontend_json(paths, df, session_id)
     face_cov = float((~df["face_missing"]).sum()) / max(len(df), 1) if len(df) else 0.0
     unavailable = face_cov < 0.2
     report: StageReport = {

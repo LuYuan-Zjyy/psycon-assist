@@ -73,6 +73,7 @@ def extract_va(
             row = {
                 "ts": ts, "face_missing": True, "conf": None,
                 "va_v": None, "va_a": None, "expr": None, "expr_prob": None,
+                "x0": None, "y0": None, "x1": None, "y1": None,
             }
             try:
                 img = np.asarray(Image.open(fp).convert("RGB"))
@@ -94,13 +95,15 @@ def extract_va(
                         row["expr_prob"] = float(np.max(scores))
                         row["conf"] = float(probs[k])
                         row["face_missing"] = False
+                        row["x0"], row["y0"], row["x1"], row["y1"] = x0, y0, x1, y1
             except Exception:
                 pass  # 单帧失败仅记 missing
             rows.append(row)
 
     df = pd.DataFrame(rows)
     if df.empty:
-        df = pd.DataFrame(columns=["ts", "face_missing", "conf", "va_v", "va_a", "expr", "expr_prob"])
+        df = pd.DataFrame(columns=["ts", "face_missing", "conf", "va_v", "va_a", "expr", "expr_prob",
+                                   "x0", "y0", "x1", "y1"])
     return df
 
 

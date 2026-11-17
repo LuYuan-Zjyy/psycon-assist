@@ -694,7 +694,7 @@ function drawFaceOverlay(t) {
 
   const boxes = state.faceBoxes || [];
   if (!boxes.length) return;
-  const fb = boxes[Math.max(0, Math.min(boxes.length - 1, Math.round(t)))];
+  const fb = nearestBy(boxes, t, (x) => x.ts);
   if (!fb || !fb.box) return;
   const vw = video.videoWidth || 320;
   const vh = video.videoHeight || 240;
@@ -732,7 +732,8 @@ function textAt(t) {
 function vaAt(t) {
   const s = state.vaSeries || [];
   if (!s.length) return null;
-  return s[Math.max(0, Math.min(s.length - 1, Math.round(t)))];
+  // 逐帧采样的 ts 可能不是 1Hz，按时间就近取，不能按索引
+  return nearestBy(s, t, (x) => x.ts);
 }
 function chunkAt(t) {
   const tl = state.sessionDetail?.timeline || [];
