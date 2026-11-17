@@ -287,6 +287,7 @@ def session_detail(session_id: str):
         "face_boxes": read_json_optional(p.root / "face" / "face_boxes.json", default=[]) or [],
         "va_series": read_json_optional(p.root / "face" / "va_series.json", default=[]) or [],
         "llm_notes": read_json_optional(p.root / "agent" / "llm_notes.json", default=[]) or [],
+        "baseline": read_json_optional(p.root / "face" / "baseline.json", default=None),
         "has_video": bool(media.get("normalized_path") and Path(media["normalized_path"]).exists()),
     }
 
