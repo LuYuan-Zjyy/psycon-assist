@@ -7,6 +7,7 @@
   insightface 的 buffalo_l 需从 GitHub 下载，在受限网络不可用）。
 - VA 用 EmotiEffLib 的 mbf_va_mtl（MobileFaceNet，最轻），直接输出 valence/arousal。
 - 离散表情用 enet_b0_8_best_vgaf（8 类）。
+- 推理用 ONNX 引擎（避免 torch checkpoint 的 mobilefacenet pickle 依赖问题）。
 """
 from __future__ import annotations
 
@@ -47,15 +48,18 @@ def extract_va(
     import torch
     from PIL import Image
 
-    from emotiefflib.facial_analysis import EmotiEffLibRecognizerTorch
+    from emotiefflib.facial_analysis import EmotiEffLibRecognizerOnnx
     from facenet_pytorch import MTCNN
 
     if device == "cuda" and not torch.cuda.is_available():
         device = "cpu"
 
+    # 人脸检测走 MTCNN（GPU 更快）；情感识别走 ONNX：
+    # EmotiEffLib 的 torch checkpoint 依赖顶层 mobilefacenet 模块，pip 包未随装，
+    # 直接 load 会 ModuleNotFoundError；ONNX 无此问题，且这些模型很小，CPU 推理已足够。
     mt = MTCNN(keep_all=True, device=device, post_process=False)
-    va_rec = EmotiEffLibRecognizerTorch(model_name=VA_MODEL, device=device)
-    expr_rec = EmotiEffLibRecognizerTorch(model_name=EXPR_MODEL, device=device)
+    va_rec = EmotiEffLibRecognizerOnnx(model_name=VA_MODEL)
+    expr_rec = EmotiEffLibRecognizerOnnx(model_name=EXPR_MODEL)
 
     with tempfile.TemporaryDirectory() as tmp:
         frames_dir = Path(tmp) / "frames"
