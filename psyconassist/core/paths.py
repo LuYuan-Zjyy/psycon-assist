@@ -41,6 +41,14 @@ class SessionPaths:
         return self.root / "face" / "au.parquet"
 
     @property
+    def va_parquet(self) -> Path:
+        return self.root / "face" / "va.parquet"
+
+    @property
+    def baseline_json(self) -> Path:
+        return self.root / "face" / "baseline.json"
+
+    @property
     def speaker_json(self) -> Path:
         return self.root / "speech" / "speaker.json"
 
@@ -77,6 +85,10 @@ class SessionPaths:
     @property
     def claims_json(self) -> Path:
         return self.root / "agent" / "claims.json"
+
+    @property
+    def dropped_json(self) -> Path:
+        return self.root / "agent" / "dropped.json"
 
     @property
     def feedback_json(self) -> Path:

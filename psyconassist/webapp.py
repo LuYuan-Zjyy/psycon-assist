@@ -283,6 +283,11 @@ def session_detail(session_id: str):
         "text_feat": text_feat,
         "voice": voice,
         "evidence": evidence,
+        # 视觉增强：逐秒人脸框 / 逐秒 VA / LLM 观察笔记（有就返回，没有就是空数组）
+        "face_boxes": read_json_optional(p.root / "face" / "face_boxes.json", default=[]) or [],
+        "va_series": read_json_optional(p.root / "face" / "va_series.json", default=[]) or [],
+        "llm_notes": read_json_optional(p.root / "agent" / "llm_notes.json", default=[]) or [],
+        "baseline": read_json_optional(p.root / "face" / "baseline.json", default=None),
         "has_video": bool(media.get("normalized_path") and Path(media["normalized_path"]).exists()),
     }
 
@@ -294,7 +299,9 @@ def subject_profile(subject_id: str):
     if profile is None:
         raise HTTPException(404, "subject 不存在")
     exemplars = s6_profile.load_exemplars(subject_id)
-    sessions = [_session_summary(s) for s in _list_sessions()]
+    # 只返回该来访者画像中登记过的场次，避免把其它 subject 的会谈混进列表
+    owned = list(profile.get("sessions") or [])
+    sessions = [_session_summary(s) for s in owned if (config.DATA_ROOT / s).exists()]
     return {"subject_id": subject_id, "profile": profile,
             "exemplars": exemplars, "sessions": sessions,
             "summary_text": s6_profile.profile_summary(profile)}

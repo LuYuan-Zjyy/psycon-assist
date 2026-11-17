@@ -70,7 +70,6 @@ class State(TypedDict, total=False):
     exemplars: list
     profile_summary: str
     claims: list
-    rewrite_count: int
     feedback: list
     llm_ok: bool
 
@@ -93,13 +92,16 @@ def _ingest(state: State) -> dict:
         "evidence": evidence,
         "quality": quality,
         "claims": [],
-        "rewrite_count": 0,
         "feedback": [],
     }
 
 
 def _quality_gate(state: State) -> Literal["abort", "timeline"]:
-    # Demo：有事件即 ok；无事件且质量报告缺模态 → 仍继续（degraded）
+    # 无事件且三类信号全部不可得 → 中止，避免产出空洞草稿；否则继续（合法空结果也 ok）
+    if not state.get("events"):
+        degrade = (state.get("quality") or {}).get("degrade") or []
+        if all(m in degrade for m in ("visual", "voice", "text")):
+            return "abort"
     return "timeline"
 
 
@@ -120,8 +122,14 @@ def _retriever(state: State) -> dict:
 
 
 def _risk(state: State) -> dict:
-    # 词典 + 规则为主；LLM 只做二次复核（有 risk 事件时）
-    return {}
+    # 风险事件强制汇总（硬规则：风险不得静默）。LLM 二次复核留待白名单扩展。
+    return {
+        "risk_hits": [
+            {"event_id": e["event_id"], "type": "risk", "t0": e.get("t0")}
+            for e in state.get("events", [])
+            if e.get("type") == "risk"
+        ]
+    }
 
 
 def _synth(state: State) -> dict:
@@ -259,16 +267,9 @@ def _validator(state: State) -> dict:
     ]}
 
 
-def _policy(state: State) -> Literal["human", "rewrite", "strip"]:
-    if state["claims"]:
-        return "human"
-    if state["rewrite_count"] < 2:
-        return "rewrite"
-    return "strip"
-
-
-def _rewrite(state: State) -> dict:
-    return {"rewrite_count": state.get("rewrite_count", 0) + 1}
+def _policy(state: State) -> Literal["human", "strip"]:
+    # 校验失败一律删除，不重写（硬规则 16）。有通过校验的句才进人工确认。
+    return "human" if state["claims"] else "strip"
 
 
 def _strip(state: State) -> dict:
@@ -276,8 +277,12 @@ def _strip(state: State) -> dict:
 
 
 def _human(state: State) -> dict:
-    """落库 claims（state=pending），交由 S5 反馈。"""
-    write_json(SessionPaths(state["session_id"]).claims_json, state["claims"])
+    """落库 claims（state=pending），交由 S5 反馈；被校验删除的句也落盘备查。"""
+    paths = SessionPaths(state["session_id"])
+    write_json(paths.claims_json, state["claims"])
+    dropped = state.get("feedback", [])
+    if dropped:
+        write_json(paths.dropped_json, dropped)
     return {}
 
 
@@ -295,7 +300,6 @@ def build_graph():
     g.add_node("synth", _synth)
     g.add_node("validator", _validator)
     g.add_node("policy", _policy)
-    g.add_node("rewrite", _rewrite)
     g.add_node("strip", _strip)
     g.add_node("human", _human)
     g.add_node("abort", _abort)
@@ -306,8 +310,7 @@ def build_graph():
     g.add_edge("retriever", "risk")
     g.add_edge("risk", "synth")
     g.add_edge("synth", "validator")
-    g.add_conditional_edges("validator", _policy, {"human": "human", "rewrite": "rewrite", "strip": "strip"})
-    g.add_edge("rewrite", "synth")
+    g.add_conditional_edges("validator", _policy, {"human": "human", "strip": "strip"})
     g.add_edge("strip", END)
     g.add_edge("human", END)
     g.add_edge("abort", END)

@@ -25,15 +25,28 @@ def run(session_id: str, media: MediaInfo, degrade: list[str] | None = None) -> 
     degrade = degrade or []
 
     au = read_parquet_optional(paths.au_parquet)
+    va_df = read_parquet_optional(paths.va_parquet)
+    if va_df is not None and not va_df.empty:
+        au = va_df  # 优先用 EmotiEffLib 直接回归的 VA
     voice = read_json_optional(paths.voice_json, default=[]) or []
     text = _load_text(paths)
+    transcript = read_json_optional(paths.transcript_json, default=[]) or []
+    word_ends = sorted({w["e"] for u in transcript for w in (u.get("words") or [])})
 
     grid = _build_grid(duration, au, voice, text)
     baseline = _compute_baseline(grid)
+    # 个体基线落盘：激活/偏离的判定依据（缺失也显式记录，供前端提示“基线不可得”）
+    base_payload = {"available": baseline is not None}
+    if baseline:
+        for k in ("v_mean", "v_sd", "a_mean", "a_sd", "window", "n"):
+            if k in baseline:
+                base_payload[k] = baseline[k]
+        base_payload["method"] = "first-8min-trim3sigma"
+    write_json(paths.baseline_json, base_payload)
     grid = _apply_zscore(grid, baseline)
     grid = _mark_anomalies(grid, text)
 
-    chunks = _grid_to_chunks(session_id, grid, duration)
+    chunks = _grid_to_chunks(session_id, grid, duration, word_ends)
     schemas.check_covers(chunks, lambda c: c["t0"], lambda c: c["t1"], duration)
     write_json(paths.chunks_json, chunks)
 
@@ -88,6 +101,7 @@ def _build_grid(duration: float, au, voice, text) -> list[dict]:
         g["voice_v"], g["voice_a"], g["conf_voice"] = vv, va_, vc
         g["text_v"], g["text_a"], g["conf_text"] = tv, ta, tc
         g.update(_fuse(g))
+        g["voice_data_present"] = bool(voice)
         grid.append(g)
     return grid
 
@@ -102,6 +116,16 @@ def _face_va(au, t0: float, t1: float):
     valid = seg[~seg["face_missing"]]
     if valid.empty:
         return None, None, cov
+
+    # 直接来自 EmotiEffLib 的 VA（va_v / va_a 列）
+    if "va_v" in valid.columns and "va_a" in valid.columns:
+        v = float(valid["va_v"].mean())
+        a = float(valid["va_a"].mean())
+        if math.isnan(v):
+            v = None
+        if math.isnan(a):
+            a = None
+        return v, a, cov
 
     def au_mean(c):
         return valid[c].mean() if c in valid.columns else float("nan")
@@ -176,81 +200,126 @@ def _fuse(g: dict) -> dict:
 
 
 def _compute_baseline(grid: list[dict]) -> dict | None:
+    """基线 = 本场前段「非极端」窗口的均值/标准差（效价 + 唤醒）。
+
+    长会谈用固定 8 分钟；短会谈（8 分钟超过会话 40%）退回前 40%，至少 2 格。
+    对均值做 3σ 截断，避免把开场异常也算进「正常」。
+    """
     n = len(grid)
-    win = max(1, min(n, int(config.BASELINE_WINDOW / config.GRID_SEC)))
-    # 短会谈：至少用前 40% 网格，避免 win 被压成 1
-    win = max(win, max(2, int(math.ceil(n * 0.4))))
-    win = min(win, n)
+    win = min(n, int(config.BASELINE_WINDOW / config.GRID_SEC))
+    pct_win = min(n, max(2, int(math.ceil(n * 0.4))))
+    if pct_win < win:  # 短会谈：8 分钟超过 40%，退回 40%
+        win = pct_win
     seg = grid[:win]
-    vs = [g["va_v"] for g in seg if g.get("va_v") is not None]
     min_n = 2 if n <= 12 else max(3, int(config.BASELINE_MIN / config.GRID_SEC))
-    if len(vs) < min_n:
+
+    def _stats(values: list) -> tuple[float, float] | None:
+        vals = [v for v in values if v is not None]
+        if len(vals) < min_n:
+            return None
+        mean = float(np.mean(vals))
+        std = float(np.std(vals))
+        if std < 1e-9:
+            std = 0.05
+        keep = [v for v in vals if abs(v - mean) / std <= 3.0]
+        if len(keep) < min_n:
+            return None
+        return float(np.mean(keep)), max(float(np.std(keep)), 0.05)
+
+    v = _stats([g.get("va_v") for g in seg])
+    a = _stats([g.get("va_a") for g in seg])
+    if v is None and a is None:
         return None
-    mean = float(np.mean(vs))
-    std = float(np.std(vs))
-    if std < 1e-9:
-        std = 0.05  # 平坦轨迹也给一个地板，便于相对偏移
-    keep = [v for v in vs if abs(v - mean) / std <= 3.0]
-    if len(keep) < min_n:
-        return None
-    return {"v_mean": float(np.mean(keep)), "v_sd": max(float(np.std(keep)), 0.05),
-            "window": win, "n": len(keep)}
+    return {
+        "v_mean": v[0] if v else None,
+        "v_sd": v[1] if v else None,
+        "a_mean": a[0] if a else None,
+        "a_sd": a[1] if a else None,
+        "window": win,
+        "n": len(seg),
+    }
 
 
 def _apply_zscore(grid: list[dict], baseline: dict | None) -> list[dict]:
-    if baseline is None or baseline["v_sd"] < 1e-9:
-        for g in grid:
-            g["z_v"] = None
-            g["z_a"] = None
-        return grid
+    vsd = baseline.get("v_sd") if baseline else None
+    asd = baseline.get("a_sd") if baseline else None
+    vmean = baseline.get("v_mean") if baseline else None
+    amean = baseline.get("a_mean") if baseline else None
     for g in grid:
-        g["z_v"] = (g["va_v"] - baseline["v_mean"]) / baseline["v_sd"] if g.get("va_v") is not None else None
-        g["z_a"] = None
+        g["z_v"] = (
+            (g["va_v"] - vmean) / vsd
+            if vsd and vmean is not None and g.get("va_v") is not None
+            else None
+        )
+        g["z_a"] = (
+            (g["va_a"] - amean) / asd
+            if asd and amean is not None and g.get("va_a") is not None
+            else None
+        )
     return grid
 
 
 def _mark_anomalies(grid: list[dict], text: list) -> list[dict]:
+    """相对本场基线的统计偏差；类型由规则决定，不调 LLM。
+
+    六类：risk / va_shift / low_activation / text_shift / incongruence / silence。
+    - va_shift：效价 z 分连续 |z|>2 的持续偏离（相对基线，不是相邻格都极端）
+    - low_activation：唤醒 z 分 < -1.5（无基线时退回会话内相对激活兜底）
+    - silence：仅在有语音数据时，来访者发声占比过低才判；无音频不判
+    """
     n = len(grid)
-    # 会话内相对激活（无脸/短视频也能出 low_activation）
+    for g in grid:
+        g["risk"] = _risk_in_window(text, g["t0"], g["t1"])
+        g["anom"] = ["risk"] if g["risk"] else []
+
+    # low_activation：优先用基线 z_a；无基线时退回会话内相对激活
     acts = [g.get("va_a") for g in grid if g.get("va_a") is not None]
     act_mean = float(np.mean(acts)) if acts else None
     act_sd = float(np.std(acts)) if acts and len(acts) >= 2 else None
     if act_sd is not None and act_sd < 1e-6:
         act_sd = 0.05
+    for g in grid:
+        if g.get("z_a") is not None and g["z_a"] < -1.5:
+            g["anom"].append("low_activation")
+        elif act_mean is not None and act_sd is not None and g.get("va_a") is not None:
+            if (g["va_a"] - act_mean) / act_sd < -1.5:
+                g["anom"].append("low_activation")
+
+    # text_shift：文本极性相对本场均值走低（独立于面部，避免无脸时伪造视觉结论）
     pols = [g.get("text_v") for g in grid if g.get("text_v") is not None]
     pol_mean = float(np.mean(pols)) if pols else None
     pol_sd = float(np.std(pols)) if pols and len(pols) >= 2 else None
     if pol_sd is not None and pol_sd < 1e-6:
         pol_sd = 0.05
-
     for g in grid:
-        g["risk"] = _risk_in_window(text, g["t0"], g["t1"])
-        g["anom"] = []
-        if g["risk"]:
-            g["anom"].append("risk")
-        if g.get("z_a") is not None and g["z_a"] < -1.5:
-            g["anom"].append("low_activation")
-        if act_mean is not None and act_sd is not None and g.get("va_a") is not None:
-            if (g["va_a"] - act_mean) / act_sd < -1.2:
-                g["anom"].append("low_activation")
         if pol_mean is not None and pol_sd is not None and g.get("text_v") is not None:
-            # 相对本场更低落的文本段（哪怕绝对极性仍为正）
-            # 这是文本情绪变化，不是面部效价——单独一类，避免无脸时伪造视觉结论
             if (g["text_v"] - pol_mean) / pol_sd < -1.2:
                 g["anom"].append("text_shift")
+
+    # incongruence：文本极性与效价符号相反
+    for g in grid:
         if g.get("text_v") is not None and g.get("va_v") is not None:
             if (g["text_v"] > 0.2 and g["va_v"] < -0.2) or (g["text_v"] < -0.2 and g["va_v"] > 0.2):
                 g["anom"].append("incongruence")
-    for i in range(n - 1):
-        zi = grid[i].get("z_v")
-        zj = grid[i + 1].get("z_v")
-        if zi is not None and zj is not None and abs(zi) > 2.0 and abs(zj) > 2.0:
-            grid[i]["anom"].append("va_shift")
-            grid[i + 1]["anom"].append("va_shift")
+
+    # va_shift：效价相对基线的持续大幅偏离（连续 |z_v|>2 的 run）
+    i = 0
+    while i < n:
+        if grid[i].get("z_v") is not None and abs(grid[i]["z_v"]) > 2.0:
+            j = i
+            while j < n and grid[j].get("z_v") is not None and abs(grid[j]["z_v"]) > 2.0:
+                j += 1
+            for k in range(i, j):
+                grid[k]["anom"].append("va_shift")
+            i = j
+        else:
+            i += 1
+
+    # silence：有语音数据但来访者发声占比过低
     for g in grid:
-        # 来访者几乎不说话 → silence；无语音覆盖也算
-        if g.get("conf_voice") is not None and g["conf_voice"] < 0.12:
+        if g.get("voice_data_present") and g.get("conf_voice") is not None and g["conf_voice"] < 0.12:
             g["anom"].append("silence")
+
     for g in grid:
         g["anom"] = list(dict.fromkeys(g["anom"]))
     return grid
@@ -261,7 +330,7 @@ def _risk_in_window(text: list, t0: float, t1: float) -> bool:
 
 
 # ---------------------------------------------------------------------------
-def _grid_to_chunks(session_id: str, grid: list[dict], duration: float) -> list[dict]:
+def _grid_to_chunks(session_id: str, grid: list[dict], duration: float, word_ends: list[float] | None = None) -> list[dict]:
     """把网格的异常标记转成连续、覆盖 [0,duration] 的 chunk（用 slot 边界）。"""
     n = len(grid)
     flags = [bool(g["anom"]) for g in grid]
@@ -321,7 +390,7 @@ def _grid_to_chunks(session_id: str, grid: list[dict], duration: float) -> list[
             cur = j
 
     # 对齐词边界（单调）+ 强制覆盖 + 重新编号
-    chunks = _finalize_chunks(session_id, chunks, duration)
+    chunks = _finalize_chunks(session_id, chunks, duration, word_ends)
     return chunks
 
 
@@ -358,6 +427,12 @@ def _make_chunk(session_id, grid, s0, s1, is_anom, types) -> dict:
     missing = []
     if va_v is None and va_a is None:
         missing.append("va: 融合权重不足或输入缺失")
+    zs = [g.get("z_v") for g in grid[s0:s1] if g.get("z_v") is not None]
+    zas = [g.get("z_a") for g in grid[s0:s1] if g.get("z_a") is not None]
+    trigger = {
+        "z_v": round(float(np.mean(zs)), 3) if zs else None,
+        "z_a": round(float(np.mean(zas)), 3) if zas else None,
+    }
     va = {"v": va_v, "a": va_a, "conf": round(conf, 3) if conf is not None else None}
     return {
         "chunk_id": f"{session_id}-C{s0:04d}",
@@ -365,7 +440,7 @@ def _make_chunk(session_id, grid, s0, s1, is_anom, types) -> dict:
         "is_anomaly": is_anom,
         "anomaly_type": atype,
         "all_types": sorted(types) if types else [],
-        "trigger": None,
+        "trigger": trigger,
         "va": va if (va_v is not None or va_a is not None) else None,
         "text": {"polarity": round(float(np.mean(pols)), 4) if pols else None},
         "missing": missing,
@@ -377,17 +452,35 @@ def _mean(xs):
     return float(np.mean(xs)) if xs else None
 
 
-def _finalize_chunks(session_id: str, chunks: list, duration: float) -> list:
-    """内部边界单调对齐词边界（可选，词边界缺省时保持 slot），首尾强制 [0,duration]。"""
-    # 用 chunk 之间共享边界作为对齐点
+def _finalize_chunks(
+    session_id: str,
+    chunks: list,
+    duration: float,
+    word_ends: list[float] | None = None,
+) -> list:
+    """把内部边界单调对齐到最近词边界，首尾强制 [0, duration]。
+
+    对齐只允许把边界「向前」挪到它之前最近的词尾（间距 <= 半个网格），
+    因此绝不会产生重叠或空洞；末块终点固定在 duration。无词边界时保持 slot 边界。
+    """
     internal = [c["t1"] for c in chunks[:-1]]
-    # 无文本词边界信息时，slot 边界已经连续；这里保持原值即可
+    if word_ends:
+        ws = sorted(word_ends)
+        max_dist = config.GRID_SEC * 0.5
+        snapped: list[float] = []
+        prev = 0.0
+        for t in internal:
+            cands = [w for w in ws if w < t and t - w <= max_dist and w > prev]
+            t2 = max(cands) if cands else t
+            if t2 <= prev:
+                t2 = t
+            snapped.append(t2)
+            prev = t2
+        internal = snapped
+
     prev = 0.0
     for i, c in enumerate(chunks):
-        if i < len(chunks) - 1:
-            t1 = internal[i]
-        else:
-            t1 = duration
+        t1 = internal[i] if i < len(chunks) - 1 else duration
         t0 = prev
         if t1 <= t0:
             t1 = t0 + 0.5  # 保底，避免零长度
