@@ -59,8 +59,9 @@ def extract_va(
     # EmotiEffLib 的 torch checkpoint 依赖顶层 mobilefacenet 模块，pip 包未随装，
     # 直接 load 会 ModuleNotFoundError；ONNX 无此问题，且这些模型很小，CPU 推理已足够。
     mt = MTCNN(keep_all=True, device=device, post_process=False)
+    # mbf_va_mtl 一次前向同时给出 8 类表情 logits + valence + arousal，
+    # 因此不再单独加载第二个表情模型（省一次推理）。
     va_rec = EmotiEffLibRecognizerOnnx(model_name=VA_MODEL)
-    expr_rec = EmotiEffLibRecognizerOnnx(model_name=EXPR_MODEL)
 
     with tempfile.TemporaryDirectory() as tmp:
         frames_dir = Path(tmp) / "frames"
@@ -74,6 +75,7 @@ def extract_va(
                 "ts": ts, "face_missing": True, "conf": None,
                 "va_v": None, "va_a": None, "expr": None, "expr_prob": None,
                 "x0": None, "y0": None, "x1": None, "y1": None,
+                "expr_ent": None, "expr_dist": None,
             }
             try:
                 img = np.asarray(Image.open(fp).convert("RGB"))
@@ -87,12 +89,18 @@ def extract_va(
                         crop = img[y0:y1, x0:x1]
                         # mbf_va_mtl 输出 10 维：前 8 是离散表情 logits，后 2 是 valence/arousal
                         _, va_scores = va_rec.predict_emotions(crop)
-                        va_scores = np.asarray(va_scores)
+                        va_scores = np.asarray(va_scores, dtype=float)
                         row["va_v"] = float(va_scores[0][8])
                         row["va_a"] = float(va_scores[0][9])
-                        labels, scores = expr_rec.predict_emotions(crop)
-                        row["expr"] = labels[0] if isinstance(labels, (list, tuple)) else labels
-                        row["expr_prob"] = float(np.max(scores))
+                        # 前 8 维是表情 logits：softmax 得到完整分布，而不是只取 argmax
+                        logits = va_scores[0][:8]
+                        e = np.exp(logits - logits.max())
+                        p = e / e.sum()
+                        ek = int(np.argmax(p))  # 注意：不能复用 k，k 是人脸框索引
+                        row["expr"] = EMOTIONS[ek]
+                        row["expr_prob"] = float(p[ek])
+                        row["expr_ent"] = float(-(p * np.log(p + 1e-9)).sum())
+                        row["expr_dist"] = [round(float(x), 4) for x in p]
                         row["conf"] = float(probs[k])
                         row["face_missing"] = False
                         row["x0"], row["y0"], row["x1"], row["y1"] = x0, y0, x1, y1
@@ -103,7 +111,7 @@ def extract_va(
     df = pd.DataFrame(rows)
     if df.empty:
         df = pd.DataFrame(columns=["ts", "face_missing", "conf", "va_v", "va_a", "expr", "expr_prob",
-                                   "x0", "y0", "x1", "y1"])
+                                   "expr_ent", "expr_dist", "x0", "y0", "x1", "y1"])
     return df
 
 

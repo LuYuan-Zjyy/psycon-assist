@@ -164,7 +164,12 @@ def _run_face_va(session_id: str, media: MediaInfo) -> StageReport:
     norm = Path(media["normalized_path"])
     duration = float(media["duration"])
     try:
-        df = fv.extract_va(norm, duration, fps=5.0, device="cuda")
+        try:
+            df = fv.extract_va(norm, duration, fps=5.0, device="cuda")
+        except Exception:
+            # GPU 被占满/OOM 时不要让整场降级为「无人脸」，回退 CPU 再试一次
+            log.warning("S1A CUDA 推理失败，回退 CPU session=%s", session_id)
+            df = fv.extract_va(norm, duration, fps=5.0, device="cpu")
     except Exception as e:
         log.exception("S1A EmotiEffLib 失败 session=%s", session_id)
         write_parquet(paths.va_parquet, pd.DataFrame(
