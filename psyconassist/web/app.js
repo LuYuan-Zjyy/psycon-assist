@@ -213,11 +213,15 @@ function renderBrief(d) {
   const duration = d.media?.duration;
 
   $("#brief-title").textContent = `${d.session_id}`;
+  const base = d.baseline;
+  const baseTxt = (base && base.available && base.v_sd != null)
+    ? `本场面部基线 效价 ${base.v_mean.toFixed(2)}±${base.v_sd.toFixed(2)}、唤醒 ${base.a_mean.toFixed(2)}±${base.a_sd.toFixed(2)}（前 ${Math.round((base.window || 480) / 60)} 分钟）`
+    : "本场基线不可得（激活判定无依据）";
   $("#brief-desc").textContent =
-    `时长 ${fmtTime(duration)} · 待复核草稿 ${pending} 条 · ` +
+    `时长 ${fmtTime(duration)} · 待复核草稿 ${pending} 条 · ` + baseTxt + " · " +
     (degrade.length
-      ? `已降级：${degrade.join("、")}（对应模态标不可得）`
-      : "各模态可用；结论仍需人工复核");
+      ? `已降级：${degrade.join("、")}`
+      : "各模态可用");
 
   $("#brief-stats").innerHTML = `
     <div class="stat"><div class="stat-value">${nEvt}</div><div class="stat-label">异常事件</div></div>
@@ -391,6 +395,8 @@ function renderVideo(d) {
     : "";
   state.faceBoxes = d.face_boxes || [];
   state.vaSeries = d.va_series || [];
+  state.baseline = d.baseline || null;
+  renderMiniTimeline(d);
   if (!video._ovBound) {
     video._ovBound = true;
     video.addEventListener("timeupdate", () => onVideoTime(video.currentTime));
@@ -407,10 +413,73 @@ function renderVideo(d) {
     video.src = `/media/${d.session_id}/norm.mp4`;
     ph.classList.add("hidden");
     video.style.display = "block";
+    $("#video-hud")?.classList.remove("hidden");
   } else {
     video.removeAttribute("src");
     video.style.display = "none";
     ph.classList.remove("hidden");
+    $("#video-hud")?.classList.add("hidden");
+    $("#video-caption")?.classList.remove("show");
+  }
+}
+
+function renderMiniTimeline(d) {
+  const anoms = $("#mini-anoms");
+  const dur = d.media?.duration || 0;
+  if (!anoms || !dur) return;
+  const segs = (d.timeline || []).filter((c) => c.is_anomaly);
+  anoms.innerHTML = segs.map((c) => {
+    const left = (c.t0 / dur) * 100;
+    const w = Math.max(0.4, ((c.t1 - c.t0) / dur) * 100);
+    return '<span class="mini-seg" style="left:' + left + '%;width:' + w + '%"></span>';
+  }).join("");
+  const mt = $("#mini-timeline");
+  if (mt && !mt._bound) {
+    mt._bound = true;
+    mt.addEventListener("click", (ev) => {
+      const r = mt.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
+      seekTo(ratio * dur);
+    });
+  }
+}
+
+function emotionWord(v, a) {
+  if (v == null) return "—";
+  if (v < -0.25 && a != null && a > 0.25) return "低落 · 激动";
+  if (v < -0.25) return "低落";
+  if (v > 0.25 && a != null && a > 0.25) return "积极 · 高昂";
+  if (v > 0.25) return "积极";
+  return "平稳";
+}
+
+function updateHud(t) {
+  const va = vaAt(t);
+  const v = va ? va.v : null;
+  const a = va ? va.a : null;
+  const barV = $("#hud-v"), barA = $("#hud-a");
+  if (barV) barV.style.width = (v == null ? 50 : ((v + 1) / 2) * 100) + "%";
+  if (barA) barA.style.width = (a == null ? 50 : ((a + 1) / 2) * 100) + "%";
+  const vv = $("#hud-vv"), av = $("#hud-av");
+  if (vv) vv.textContent = v == null ? "—" : v.toFixed(2);
+  if (av) av.textContent = a == null ? "—" : a.toFixed(2);
+  const emo = $("#hud-emo");
+  if (emo) emo.textContent = emotionWord(v, a);
+
+  const ph = $("#mini-playhead");
+  const dur = state.sessionDetail?.media?.duration || 0;
+  if (ph && dur) ph.style.left = ((t / dur) * 100) + "%";
+
+  const cap = $("#video-caption");
+  if (cap) {
+    const notes = state.sessionDetail?.llm_notes || [];
+    const n = notes.find((x) => t >= x.t0 && t < x.t1);
+    if (n && n.note) {
+      cap.textContent = n.note.slice(0, 72) + (n.note.length > 72 ? "…" : "");
+      cap.classList.add("show");
+    } else {
+      cap.classList.remove("show");
+    }
   }
 }
 
@@ -713,6 +782,18 @@ function updateNowState(t) {
     faceEl.innerHTML = (fv != null || fa != null)
       ? `效价 <b>${fv == null ? "—" : fv.toFixed(3)}</b> · 唤醒 <b>${fa == null ? "—" : fa.toFixed(3)}</b>`
       : "不可得";
+  }
+  try { updateHud(t); } catch (e) { console.error(e); }
+
+  // 激活是否有依据：以本场个体基线为参照
+  const base = state.sessionDetail?.baseline;
+  if (sigEl) {
+    if (base && base.available && fv != null && base.v_sd) {
+      const z = (fv - base.v_mean) / base.v_sd;
+      sigEl.innerHTML += '　<span class="now-note">相对本场基线 ' + (z >= 0 ? "+" : "") + z.toFixed(1) + 'σ</span>';
+    } else if (base && base.available === false) {
+      sigEl.innerHTML += '　<span class="now-note">基线不可得，激活判定无依据</span>';
+    }
   }
 
   let va2 = null;

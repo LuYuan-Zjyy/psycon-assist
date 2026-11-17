@@ -35,6 +35,14 @@ def run(session_id: str, media: MediaInfo, degrade: list[str] | None = None) -> 
 
     grid = _build_grid(duration, au, voice, text)
     baseline = _compute_baseline(grid)
+    # 个体基线落盘：激活/偏离的判定依据（缺失也显式记录，供前端提示“基线不可得”）
+    base_payload = {"available": baseline is not None}
+    if baseline:
+        for k in ("v_mean", "v_sd", "a_mean", "a_sd", "window", "n"):
+            if k in baseline:
+                base_payload[k] = baseline[k]
+        base_payload["method"] = "first-8min-trim3sigma"
+    write_json(paths.baseline_json, base_payload)
     grid = _apply_zscore(grid, baseline)
     grid = _mark_anomalies(grid, text)
 

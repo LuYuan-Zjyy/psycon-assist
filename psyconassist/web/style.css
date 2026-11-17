@@ -940,3 +940,35 @@ main {
   .claims-toolbar { align-items: flex-start; }
   .claim-jump { margin-left: 0; }
 }
+
+/* ---- 视频 HUD / 字幕 / 迷你时间轴 ---- */
+.video-hud {
+  position: absolute; left: 12px; top: 12px; padding: 10px 12px; border-radius: 10px;
+  background: rgba(8, 18, 24, .72); backdrop-filter: blur(6px);
+  border: 1px solid rgba(255,255,255,.12); min-width: 178px; pointer-events: none;
+}
+.video-hud.hidden { display: none; }
+.hud-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.hud-k { font-size: 11px; color: #cfe3e0; width: 26px; }
+.hud-bar { position: relative; flex: 1; height: 6px; border-radius: 3px; background: rgba(255,255,255,.16); overflow: hidden; }
+.hud-bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 50%; border-radius: 3px; background: #35c2ae; transition: width .15s linear; }
+#hud-a { background: #e0a33c; }
+.hud-num { font-size: 11px; color: #eaf4f2; width: 42px; text-align: right; }
+.hud-emo { font-size: 12px; color: #ffd24a; font-weight: 600; margin-top: 2px; }
+.video-caption {
+  position: absolute; left: 12px; right: 12px; bottom: 44px; padding: 8px 12px;
+  border-radius: 8px; background: rgba(8,18,24,.68); color: #f1f7f6;
+  font-size: 13px; line-height: 1.55; pointer-events: none;
+  opacity: 0; transition: opacity .2s ease;
+}
+.video-caption.show { opacity: 1; }
+.mini-timeline {
+  position: relative; height: 8px; margin: 10px 2px 2px; border-radius: 4px;
+  background: #e8efec; cursor: pointer; overflow: hidden;
+}
+.mini-anoms { position: absolute; inset: 0; }
+.mini-seg { position: absolute; top: 0; bottom: 0; background: rgba(214,69,69,.45); }
+.mini-playhead {
+  position: absolute; top: -2px; bottom: -2px; width: 2px; background: #c9463c;
+  left: 0; transition: left .1s linear;
+}

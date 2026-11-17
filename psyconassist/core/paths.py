@@ -45,6 +45,10 @@ class SessionPaths:
         return self.root / "face" / "va.parquet"
 
     @property
+    def baseline_json(self) -> Path:
+        return self.root / "face" / "baseline.json"
+
+    @property
     def speaker_json(self) -> Path:
         return self.root / "speech" / "speaker.json"
 
