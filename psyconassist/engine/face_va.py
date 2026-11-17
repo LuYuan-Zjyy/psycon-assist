@@ -5,7 +5,8 @@
 
 - 人脸检测用 facenet-pytorch 的 MTCNN（权重内置、无需联网下载；
   insightface 的 buffalo_l 需从 GitHub 下载，在受限网络不可用）。
-- VA 用 EmotiEffLib 的 mbf_va_mtl（MobileFaceNet，最轻），直接输出 valence/arousal。
+- VA 用 EmotiEffLib 的 mbf_va_mtl（MobileFaceNet，最轻）：predict_emotions 输出
+  10 维（8 表情 logits + valence + arousal），取末两位。
 - 离散表情用 enet_b0_8_best_vgaf（8 类）。
 - 推理用 ONNX 引擎（避免 torch checkpoint 的 mobilefacenet pickle 依赖问题）。
 """
@@ -83,9 +84,11 @@ def extract_va(
                     x1, y1 = min(img.shape[1], x1), min(img.shape[0], y1)
                     if x1 - x0 > 20 and y1 - y0 > 20:
                         crop = img[y0:y1, x0:x1]
-                        feat = va_rec.extract_features(crop)
-                        row["va_v"] = float(feat[0])
-                        row["va_a"] = float(feat[1])
+                        # mbf_va_mtl 输出 10 维：前 8 是离散表情 logits，后 2 是 valence/arousal
+                        _, va_scores = va_rec.predict_emotions(crop)
+                        va_scores = np.asarray(va_scores)
+                        row["va_v"] = float(va_scores[0][8])
+                        row["va_a"] = float(va_scores[0][9])
                         labels, scores = expr_rec.predict_emotions(crop)
                         row["expr"] = labels[0] if isinstance(labels, (list, tuple)) else labels
                         row["expr_prob"] = float(np.max(scores))
