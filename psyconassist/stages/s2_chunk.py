@@ -25,6 +25,9 @@ def run(session_id: str, media: MediaInfo, degrade: list[str] | None = None) -> 
     degrade = degrade or []
 
     au = read_parquet_optional(paths.au_parquet)
+    va_df = read_parquet_optional(paths.va_parquet)
+    if va_df is not None and not va_df.empty:
+        au = va_df  # 优先用 EmotiEffLib 直接回归的 VA
     voice = read_json_optional(paths.voice_json, default=[]) or []
     text = _load_text(paths)
     transcript = read_json_optional(paths.transcript_json, default=[]) or []
@@ -105,6 +108,16 @@ def _face_va(au, t0: float, t1: float):
     valid = seg[~seg["face_missing"]]
     if valid.empty:
         return None, None, cov
+
+    # 直接来自 EmotiEffLib 的 VA（va_v / va_a 列）
+    if "va_v" in valid.columns and "va_a" in valid.columns:
+        v = float(valid["va_v"].mean())
+        a = float(valid["va_a"].mean())
+        if math.isnan(v):
+            v = None
+        if math.isnan(a):
+            a = None
+        return v, a, cov
 
     def au_mean(c):
         return valid[c].mean() if c in valid.columns else float("nan")

@@ -17,6 +17,7 @@ from ..core.logging_utils import get_logger
 from ..core.models import MediaInfo, StageReport
 from ..core.paths import SessionPaths
 from ..engine import openface as of
+from ..engine import face_va as fv
 
 log = get_logger(__name__)
 
@@ -33,15 +34,19 @@ def run(session_id: str, media: MediaInfo) -> StageReport:
     au_path = paths.au_parquet
     empty_cols = ["ts", "face_id", "conf", *AU_COLS, *POSE_COLS, "face_missing"]
 
+    # 优先 EmotiEffLib（Linux/GPU，直接回归 VA + 表情）；不可用再回退 OpenFace
+    if fv.available():
+        return _run_face_va(session_id, media)
+
     if not of.available():
         write_parquet(au_path, pd.DataFrame(columns=empty_cols))
-        log.warning("S1A degrade: OpenFace 未配置 session=%s", session_id)
+        log.warning("S1A degrade: 无 EmotiEffLib 且 OpenFace 未配置 session=%s", session_id)
         return {
             "ok": False,
             "visual_unavailable": True,
             "face_cov": 0.0,
             "degrade": ["visual"],
-            "reason": "OpenFace 未配置（OPENFACE_BIN）",
+            "reason": "无 EmotiEffLib 且 OpenFace 未配置",
         }
 
     norm = Path(media["normalized_path"])
@@ -122,3 +127,34 @@ def _parse_openface(csv: Path, fps: float) -> pd.DataFrame:
     keep = ["ts", "conf", *AU_COLS, *POSE_COLS]
     keep = [c for c in keep if c in df.columns]
     return df[keep].copy()
+
+
+def _run_face_va(session_id: str, media: MediaInfo) -> StageReport:
+    """EmotiEffLib 路径：抽帧 → MTCNN 检测 → VA + 离散表情 → face/va.parquet。"""
+    paths = SessionPaths(session_id)
+    norm = Path(media["normalized_path"])
+    duration = float(media["duration"])
+    try:
+        df = fv.extract_va(norm, duration, fps=5.0, device="cuda")
+    except Exception as e:
+        log.exception("S1A EmotiEffLib 失败 session=%s", session_id)
+        write_parquet(paths.va_parquet, pd.DataFrame(
+            columns=["ts", "face_missing", "conf", "va_v", "va_a", "expr", "expr_prob"]))
+        return {
+            "ok": False, "visual_unavailable": True, "face_cov": 0.0,
+            "degrade": ["visual"], "reason": f"EmotiEffLib 失败: {e}",
+        }
+
+    write_parquet(paths.va_parquet, df)
+    face_cov = float((~df["face_missing"]).sum()) / max(len(df), 1) if len(df) else 0.0
+    unavailable = face_cov < 0.2
+    report: StageReport = {
+        "ok": not unavailable,
+        "visual_unavailable": unavailable,
+        "face_cov": round(face_cov, 4),
+        "degrade": ["visual"] if unavailable else [],
+    }
+    if unavailable:
+        report["reason"] = f"face_cov={face_cov:.2f} < 0.2"
+    log.info("S1A(EmotiEffLib) done session=%s face_cov=%.3f frames=%d", session_id, face_cov, len(df))
+    return report
