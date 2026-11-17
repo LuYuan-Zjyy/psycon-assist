@@ -259,6 +259,7 @@ def session_detail(session_id: str):
         timeline.append({
             "t0": c["t0"], "t1": c["t1"],
             "v": va.get("v"), "a": va.get("a"),
+            "expr": va.get("expr"), "expr_p": va.get("expr_p"), "expr_ent": va.get("expr_ent"),
             "is_anomaly": c.get("is_anomaly", False),
             "anomaly_type": c.get("anomaly_type"),
             "chunk_id": c.get("chunk_id"),

@@ -464,7 +464,16 @@ function updateHud(t) {
   if (vv) vv.textContent = v == null ? "—" : v.toFixed(2);
   if (av) av.textContent = a == null ? "—" : a.toFixed(2);
   const emo = $("#hud-emo");
-  if (emo) emo.textContent = emotionWord(v, a);
+  const chunk = chunkAt(t);
+  const EXPR_ZH = { Neutral: "中性", Happiness: "高兴", Sadness: "悲伤", Surprise: "惊讶",
+                    Fear: "恐惧", Disgust: "厌恶", Anger: "愤怒", Contempt: "轻蔑" };
+  if (emo) {
+    if (chunk && chunk.expr) {
+      emo.textContent = (EXPR_ZH[chunk.expr] || chunk.expr) + (chunk.expr_p == null ? "" : " " + chunk.expr_p.toFixed(2));
+    } else {
+      emo.textContent = emotionWord(v, a);
+    }
+  }
 
   const ph = $("#mini-playhead");
   const dur = state.sessionDetail?.media?.duration || 0;
@@ -780,9 +789,14 @@ function updateNowState(t) {
   if (fv == null && chunk?.v != null) { fv = chunk.v; fa = chunk.a; }
 
   if (faceEl) {
-    faceEl.innerHTML = (fv != null || fa != null)
+    const EXPR = { Neutral: "中性", Happiness: "高兴", Sadness: "悲伤", Surprise: "惊讶",
+                   Fear: "恐惧", Disgust: "厌恶", Anger: "愤怒", Contempt: "轻蔑" };
+    const eTxt = chunk && chunk.expr
+      ? `<br/>表情 <b>${EXPR[chunk.expr] || chunk.expr}</b>${chunk.expr_p == null ? "" : " " + chunk.expr_p.toFixed(2)}${chunk.expr_ent == null ? "" : `（熵 ${chunk.expr_ent.toFixed(2)}）`}`
+      : "";
+    faceEl.innerHTML = ((fv != null || fa != null)
       ? `效价 <b>${fv == null ? "—" : fv.toFixed(3)}</b> · 唤醒 <b>${fa == null ? "—" : fa.toFixed(3)}</b>`
-      : "不可得";
+      : "不可得") + eTxt;
   }
   try { updateHud(t); } catch (e) { console.error(e); }
 
