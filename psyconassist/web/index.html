@@ -3,185 +3,268 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PsyConAssist · 会谈分析</title>
+  <title>PsyConAssist · 咨询师工作台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Literata:opsz,wght@7..72,500;7..72,650;7..72,700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/style.css" />
   <script src="/echarts.min.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <span class="brand-mark">Ψ</span>
-      <span class="brand-name">PsyConAssist</span>
-      <span class="brand-sub">会谈分析工作台</span>
-    </div>
-    <div class="topbar-selects">
-      <label>来访者
-        <select id="subject-select"></select>
-      </label>
-      <label>会谈
-        <select id="session-select"></select>
-      </label>
-      <button id="upload-btn" class="upload-btn">＋ 上传新视频</button>
-    </div>
-  </header>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">Ψ</span>
+        <div class="brand-text">
+          <span class="brand-name">PsyConAssist</span>
+          <span class="brand-sub">会谈观察 · 证据可溯源</span>
+        </div>
+      </div>
+      <div class="topbar-controls">
+        <label class="field">
+          <span>来访者</span>
+          <select id="subject-select"></select>
+        </label>
+        <label class="field">
+          <span>本场会谈</span>
+          <select id="session-select"></select>
+        </label>
+        <button id="upload-btn" class="btn btn-primary" type="button">上传新会谈</button>
+      </div>
+    </header>
 
-  <nav class="tabs">
-    <button class="tab active" data-tab="timeline">时间轴</button>
-    <button class="tab" data-tab="claims">草稿复核 <span id="claims-badge" class="badge"></span></button>
-    <button class="tab" data-tab="profile">来访者画像</button>
-  </nav>
+    <div id="session-brief" class="session-brief" aria-live="polite">
+      <div class="brief-lead">
+        <p class="brief-kicker">辅助观察草稿 · 非诊断工具</p>
+        <h1 id="brief-title">选择一场会谈开始复核</h1>
+        <p id="brief-desc" class="brief-desc">每条结论应能回跳到录像与指标证据；缺失模态标「不可得」，不静默填零。</p>
+      </div>
+      <div id="brief-stats" class="brief-stats"></div>
+      <div id="modality-strip" class="modality-strip"></div>
+    </div>
 
-  <main>
-    <!-- 时间轴视图 -->
-    <section id="view-timeline" class="view active">
-      <div id="quality-banner" class="quality-banner hidden"></div>
-      <div class="grid-2">
-        <div class="card video-card">
-          <div class="card-head"><h2>录像</h2><span id="video-meta" class="muted"></span></div>
-          <div class="video-wrap" id="video-wrap">
-            <video id="video" controls preload="metadata"></video>
-            <div id="video-placeholder" class="video-placeholder hidden">
-              <div class="ph-icon">▶</div>
-              <div>当前为合成演示数据，无真实视频</div>
-              <div class="muted">接入真实样片后此处将显示可跳转录像</div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="timeline" type="button" role="tab" aria-selected="true">会谈回看</button>
+      <button class="tab" data-tab="claims" type="button" role="tab" aria-selected="false">
+        草稿复核 <span id="claims-badge" class="badge" hidden></span>
+      </button>
+      <button class="tab" data-tab="profile" type="button" role="tab" aria-selected="false">来访者画像</button>
+    </nav>
+
+    <main>
+      <!-- 会谈回看 -->
+      <section id="view-timeline" class="view active" role="tabpanel">
+        <div id="quality-banner" class="quality-banner hidden"></div>
+
+        <div class="workspace">
+          <div class="workspace-primary">
+            <section class="panel">
+              <header class="panel-head">
+                <h2>录像回放</h2>
+                <span id="video-meta" class="meta"></span>
+              </header>
+              <div class="video-wrap" id="video-wrap">
+                <video id="video" controls preload="metadata"></video>
+                <canvas id="face-overlay" class="face-overlay"></canvas>
+                <div id="now-badge" class="now-badge"></div>
+                <div id="video-placeholder" class="video-placeholder hidden">
+                  <div class="ph-icon">▶</div>
+                  <div>当前为合成演示数据，无真实视频</div>
+                  <div class="meta">点击事件或草稿仍可按时间定位信号与转写</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <header class="panel-head">
+                <h2>效价 / 唤醒轨迹</h2>
+                <div class="legend">
+                  <span><i class="swatch swatch-v"></i>效价</span>
+                  <span><i class="swatch swatch-a"></i>唤醒</span>
+                  <span><i class="swatch swatch-anom"></i>异常段</span>
+                </div>
+              </header>
+              <div id="va-chart" class="chart"></div>
+              <p class="panel-note">点击曲线可跳转至对应时刻；红色底色为相对本场基线检出的异常窗。</p>
+            </section>
+          </div>
+
+          <aside class="workspace-aside">
+            <section class="panel panel-tight">
+              <header class="panel-head">
+                <h2>此刻观察</h2>
+                <span id="now-time" class="meta mono"></span>
+              </header>
+              <div id="now-story" class="now-story">播放录像或点击事件后，这里会汇总该时刻的可观测信号。</div>
+              <div id="now-signal" class="now-signal"></div>
+              <div class="now-grid">
+                <div class="now-cell">
+                  <div class="now-k">视觉（面部 VA）</div>
+                  <div id="now-face" class="now-v">—</div>
+                </div>
+                <div class="now-cell">
+                  <div class="now-k">语音（F0 / 响度）</div>
+                  <div id="now-voice" class="now-v">—</div>
+                </div>
+                <div class="now-cell">
+                  <div class="now-k">文本（极性）</div>
+                  <div id="now-text" class="now-v">—</div>
+                </div>
+                <div class="now-cell now-fused">
+                  <div class="now-k">融合 V / A</div>
+                  <div id="now-fused" class="now-v">—</div>
+                  <div class="now-rule">权重 视觉 0.5 · 语音 0.3 · 文本 0.2</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel panel-tight">
+              <header class="panel-head">
+                <h2>异常事件</h2>
+                <span class="meta">规则定级 · 可回跳</span>
+              </header>
+              <div id="event-list" class="event-list"></div>
+            </section>
+          </aside>
+        </div>
+
+        <section class="panel">
+          <header class="panel-head">
+            <h2>信号层（S1）</h2>
+            <span class="meta">声学与文本极性 · 缺失模态不伪造</span>
+          </header>
+          <div class="signal-grid">
+            <div>
+              <div class="sig-title">来访者语音声学</div>
+              <div id="sig-voice-chart" class="chart chart-sm"></div>
+            </div>
+            <div>
+              <div class="sig-title">文本极性 / 风险词</div>
+              <div id="sig-pol-chart" class="chart chart-sm"></div>
             </div>
           </div>
-        </div>
-        <div class="card">
-          <div class="card-head">
-            <h2>效价 / 唤醒轨迹</h2>
-            <div class="legend">
-              <span class="dot dot-v"></span>效价
-              <span class="dot dot-a"></span>唤醒
-              <span class="dot dot-anom"></span>异常段
+        </section>
+
+        <section class="panel">
+          <header class="panel-head">
+            <h2>转写</h2>
+            <span id="transcript-meta" class="meta"></span>
+          </header>
+          <div id="transcript-list" class="transcript-list"></div>
+        </section>
+      </section>
+
+      <!-- 草稿复核 -->
+      <section id="view-claims" class="view" role="tabpanel">
+        <div class="claims-intro">
+          <div>
+            <h2 class="section-title">草稿复核</h2>
+            <p class="section-lead">采纳 / 改写 / 否决会进入反馈闭环；改写文本将作为下场 RAG 示例。严重程度由规则表决定，不可改写。</p>
+          </div>
+          <div class="claims-toolbar">
+            <div class="filters" id="claim-filters">
+              <button class="chip active" data-filter="all" type="button">全部</button>
+              <button class="chip" data-filter="pending" type="button">待复核</button>
+              <button class="chip" data-filter="accept" type="button">已采纳</button>
+              <button class="chip" data-filter="edit" type="button">已改写</button>
+              <button class="chip" data-filter="reject" type="button">已否决</button>
             </div>
-          </div>
-          <div id="va-chart" class="chart"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <h2>实时信号监控</h2>
-          <span class="muted">S1 三路特征 · 语音声学 / 文本极性（人脸 AU 需本机 OpenFace）</span>
-        </div>
-        <div class="grid-2">
-          <div>
-            <div class="sig-title">语音声学（来访者）</div>
-            <div id="sig-voice-chart" class="chart"></div>
-          </div>
-          <div>
-            <div class="sig-title">文本极性 / 风险</div>
-            <div id="sig-pol-chart" class="chart"></div>
+            <span id="claim-stats" class="meta"></span>
           </div>
         </div>
-      </div>
+        <div id="claim-list" class="claim-list"></div>
+      </section>
 
-      <div class="card">
-        <div class="card-head">
-          <h2>事件</h2>
-          <span class="muted">点击事件跳转到对应时间</span>
+      <!-- 画像 -->
+      <section id="view-profile" class="view" role="tabpanel">
+        <div id="comparability-gate" class="gate-banner"></div>
+        <div class="profile-layout">
+          <section class="panel">
+            <header class="panel-head">
+              <h2>跨次画像</h2>
+              <span id="profile-subject" class="meta"></span>
+            </header>
+            <div id="profile-summary" class="profile-summary"></div>
+            <div class="profile-metrics" id="profile-metrics"></div>
+          </section>
+          <section class="panel">
+            <header class="panel-head">
+              <h2>该来访者场次</h2>
+              <span class="meta">点击切换到会谈回看</span>
+            </header>
+            <div id="subject-sessions" class="session-list"></div>
+          </section>
         </div>
-        <div id="event-list" class="event-list"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-head">
-          <h2>转写</h2>
-          <span id="transcript-meta" class="muted"></span>
+        <div class="profile-layout">
+          <section class="panel">
+            <header class="panel-head">
+              <h2>本场否决原因分布</h2>
+            </header>
+            <div id="feedback-chart" class="chart chart-sm"></div>
+          </section>
+          <section class="panel">
+            <header class="panel-head">
+              <h2>历史改写示例（RAG）</h2>
+            </header>
+            <div id="exemplar-list" class="exemplar-list"></div>
+          </section>
         </div>
-        <div id="transcript-list" class="transcript-list"></div>
-      </div>
-    </section>
+      </section>
+    </main>
 
-    <!-- 草稿复核视图 -->
-    <section id="view-claims" class="view">
-      <div class="claims-toolbar">
-        <div class="filters" id="claim-filters">
-          <button class="chip active" data-filter="all">全部</button>
-          <button class="chip" data-filter="pending">待复核</button>
-          <button class="chip" data-filter="edit">已改写</button>
-          <button class="chip" data-filter="reject">已否决</button>
-          <button class="chip" data-filter="accept">已采纳</button>
-        </div>
-        <span id="claim-stats" class="muted"></span>
-      </div>
-      <div id="claim-list" class="claim-list"></div>
-    </section>
+    <footer class="app-footer">
+      <span>PsyConAssist · 证据可溯源 · severity 由规则决定 · comparability &lt; 0.7 不做跨次比较结论</span>
+    </footer>
+  </div>
 
-    <!-- 画像视图 -->
-    <section id="view-profile" class="view">
-      <div class="grid-2">
-        <div class="card">
-          <div class="card-head"><h2>来访者画像</h2></div>
-          <div id="profile-summary"></div>
-          <div class="profile-metrics" id="profile-metrics"></div>
-        </div>
-        <div class="card">
-          <div class="card-head"><h2>跨次会话</h2></div>
-          <div id="subject-sessions" class="session-list"></div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-head"><h2>反馈分布</h2></div>
-        <div id="feedback-chart" class="chart"></div>
-      </div>
-      <div class="card">
-        <div class="card-head"><h2>历史采纳示例（RAG 素材）</h2></div>
-        <div id="exemplar-list" class="exemplar-list"></div>
-      </div>
-    </section>
-  </main>
+  <div id="toast" class="toast" role="status"></div>
 
-  <div id="toast" class="toast"></div>
-
-  <!-- 上传弹窗 -->
-  <div id="upload-modal" class="modal hidden">
+  <div id="upload-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="upload-title">
     <div class="modal-card">
       <div class="modal-head">
-        <h2>上传新会谈视频</h2>
-        <button class="modal-close" id="modal-close">×</button>
+        <h2 id="upload-title">上传新会谈视频</h2>
+        <button class="modal-close" id="modal-close" type="button" aria-label="关闭">×</button>
       </div>
       <div class="modal-body">
         <div class="form-row">
-          <label>来访者 ID</label>
-          <input id="up-subject" type="text" placeholder="如 P-0001（新来访者可填新 ID）" value="P-0001" />
+          <label for="up-subject">来访者 ID</label>
+          <input id="up-subject" type="text" placeholder="如 P-0001" value="P-0001" />
         </div>
         <div class="form-row">
-          <label>视频文件（mp4/mov，画面=来访者单脸，声音=双人）</label>
+          <label>视频文件（画面＝来访者单脸；声音＝双人）</label>
           <div class="dropzone" id="dropzone">
             <input id="up-file" type="file" accept=".mp4,.mov,video/*" hidden />
             <div class="dz-inner">
-              <div class="dz-icon">⬆</div>
-              <div id="dz-text">点击选择文件，或拖拽到此处</div>
+              <div class="dz-icon">↑</div>
+              <div id="dz-text">点击选择，或拖拽到此处</div>
             </div>
           </div>
-          <div id="file-info" class="muted" style="margin-top:6px"></div>
+          <div id="file-info" class="meta"></div>
         </div>
         <div class="form-row form-inline">
           <div>
-            <label>来访者声音样本起始（秒）</label>
-            <input id="up-t0" type="number" step="0.1" min="0" placeholder="如 12.4" />
+            <label for="up-t0">来访者声音样本起始（秒）</label>
+            <input id="up-t0" type="number" step="0.1" min="0" placeholder="12.4" />
           </div>
           <div>
-            <label>结束（秒）</label>
-            <input id="up-t1" type="number" step="0.1" min="0" placeholder="如 15.4" />
+            <label for="up-t1">结束（秒）</label>
+            <input id="up-t1" type="number" step="0.1" min="0" placeholder="15.4" />
           </div>
         </div>
-        <div class="form-hint">声音样本：播放录像中「来访者说话」的任一段 3 秒左右区间，用于识别来访者的声音。</div>
+        <p class="form-hint">选取录像中「仅来访者说话」约 3 秒区间，用于说话人角色映射。样本缺失会导致分离降级。</p>
       </div>
       <div class="modal-foot">
-        <button class="btn btn-ghost" id="modal-cancel">取消</button>
-        <button class="btn btn-accept" id="modal-submit">开始分析</button>
+        <button class="btn btn-ghost" id="modal-cancel" type="button">取消</button>
+        <button class="btn btn-primary" id="modal-submit" type="button">开始分析</button>
       </div>
     </div>
   </div>
 
-  <!-- 处理进度 -->
   <div id="progress-bar" class="progress hidden">
     <div class="progress-inner">
       <div class="spinner"></div>
       <div id="progress-text">正在处理…</div>
+      <ol id="progress-stages" class="progress-stages"></ol>
     </div>
   </div>
 
