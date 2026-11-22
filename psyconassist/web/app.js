@@ -269,6 +269,7 @@ async function loadTimeline() {
   state.voiceBase = null;
   const safe = (fn, arg) => { try { fn(arg); } catch (e) { console.error(e); } };
   safe(renderBrief, d);
+  safe(renderBriefing, d);
   safe(renderQuality, d);
   safe(renderVideo, d);
   safe(renderEvents, d);
@@ -1460,3 +1461,77 @@ async function sendChat(text) {
     }
   };
 })();
+
+
+/* ---------------- 会谈导读（briefing） ---------------- */
+function fmtMMSS(sec) {
+  const s = Math.max(0, Math.round(sec || 0));
+  const m = Math.floor(s / 60);
+  return String(m).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+}
+
+function renderBriefing(d) {
+  const card = $("#briefing-card");
+  if (!card) return;
+  const b = d.briefing;
+  const body = $("#briefing-body");
+  const meta = $("#briefing-meta");
+  card.classList.remove("hidden");
+
+  if (!b) {
+    $("#briefing-overview").textContent =
+      "这场会谈是用旧版本分析的，没有导读。重新分析后会生成导读（结果写入新会话，不覆盖本场）。";
+    $("#briefing-phases").innerHTML = "";
+    $("#briefing-moments").innerHTML = "";
+    const cav = $("#briefing-caveats");
+    if (cav) cav.classList.add("hidden");
+    if (meta) meta.textContent = "";
+    return;
+  }
+
+  $("#briefing-overview").textContent = b.overview || "";
+
+  const phases = b.phases || [];
+  $("#briefing-phases").innerHTML = phases.map((p) => {
+    return '<div class="briefing-phase" data-t="' + (p.t0 || 0) + '">' +
+      '<span class="ph-time">' + fmtMMSS(p.t0) + "–" + fmtMMSS(p.t1) + '</span>' +
+      '<span class="ph-sum">' + esc(p.summary || "") + '</span></div>';
+  }).join("");
+  $("#briefing-phases").querySelectorAll(".briefing-phase").forEach((el) => {
+    el.onclick = () => seekTo(parseFloat(el.dataset.t) || 0);
+  });
+
+  const moments = b.key_moments || [];
+  $("#briefing-moments").innerHTML = moments.length
+    ? moments.map((m) => {
+        const sev = m.severity === "high" ? "高" : m.severity === "medium" ? "中" : "低";
+        return '<div class="briefing-moment" data-t="' + (m.peak_t != null ? m.peak_t : (m.t0 || 0)) + '">' +
+          '<span class="mo-time">' + fmtMMSS(m.t0) + '</span>' +
+          '<span class="mo-title">' + esc(m.title || "") + '</span>' +
+          '<span class="mo-sev sev-' + (m.severity || "low") + '">' + sev + '</span></div>';
+      }).join("")
+    : '<div class="empty">本场没有需要特别回看的时刻</div>';
+  $("#briefing-moments").querySelectorAll(".briefing-moment").forEach((el) => {
+    el.onclick = () => seekTo(parseFloat(el.dataset.t) || 0);
+  });
+
+  const cav = $("#briefing-caveats");
+  const list = $("#briefing-caveat-list");
+  let notes = b.caveats;
+  if (notes && !Array.isArray(notes)) notes = Object.values(notes);
+  if (cav && list) {
+    if (notes && notes.length) {
+      list.innerHTML = notes.map((x) => "<li>" + esc(String(x)) + "</li>").join("");
+      cav.classList.remove("hidden");
+    } else {
+      cav.classList.add("hidden");
+    }
+  }
+
+  if (meta) {
+    const c = b.counts || {};
+    const sev = c.by_severity || {};
+    meta.textContent = "事件 " + (c.events || 0) + " · 高 " + (sev.high || 0) +
+      " · 回看 " + moments.length + (b.llm_ok === false ? " · 概览由规则生成" : "");
+  }
+}

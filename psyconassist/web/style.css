@@ -995,3 +995,26 @@ main {
 .chat-form { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #e6ecea; }
 .chat-form input { flex: 1; padding: 8px 10px; border: 1px solid #dfe7e4; border-radius: 8px; }
 .reexam-card { margin: 10px 0; padding: 12px 14px; border-left: 4px solid #c9a227; background: #fdf8e6; border-radius: 6px; font-size: 13px; line-height: 1.7; }
+
+
+/* ---- 会谈导读 ---- */
+.briefing-panel { margin-bottom: 14px; }
+.briefing-overview { font-size: 14px; line-height: 1.85; margin: 2px 0 12px; color: #26433c; }
+.briefing-phases { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.briefing-phase { display: flex; gap: 12px; align-items: baseline; padding: 7px 10px; border-radius: 6px; background: #f6f9f8; cursor: pointer; }
+.briefing-phase:hover { background: #eaf2ef; }
+.briefing-phase .ph-time { font-family: var(--mono, monospace); font-size: 12px; color: #2f6f63; min-width: 96px; }
+.briefing-phase .ph-sum { font-size: 13px; color: #33433f; }
+.briefing-sub { font-weight: 600; font-size: 13px; margin: 6px 0 6px; color: #26433c; }
+.briefing-moments { display: flex; flex-direction: column; gap: 4px; }
+.briefing-moment { display: flex; gap: 12px; align-items: baseline; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+.briefing-moment:hover { background: #fdf6e9; }
+.briefing-moment .mo-time { font-family: var(--mono, monospace); font-size: 12px; color: #8a6d1f; min-width: 96px; }
+.briefing-moment .mo-title { flex: 1; font-size: 13px; color: #33433f; }
+.briefing-moment .mo-sev { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: #eef1f0; color: #6b7c78; }
+.briefing-moment .mo-sev.sev-high { background: #fbe9e7; color: #b0433a; }
+.briefing-moment .mo-sev.sev-medium { background: #fdf1dd; color: #9a6b1a; }
+.briefing-caveats { margin-top: 12px; font-size: 12px; color: #6b7c78; }
+.briefing-caveats summary { cursor: pointer; }
+.briefing-caveats ul { margin: 6px 0 0 18px; padding: 0; }
+.briefing-caveats li { margin: 3px 0; }
