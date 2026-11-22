@@ -972,3 +972,26 @@ main {
   position: absolute; top: -2px; bottom: -2px; width: 2px; background: #c9463c;
   left: 0; transition: left .1s linear;
 }
+
+
+/* ---- 咨询助手 ---- */
+.chat-fab {
+  position: fixed; right: 22px; bottom: 22px; width: 52px; height: 52px; border-radius: 50%;
+  border: none; background: #2f6f63; color: #fff; font-size: 20px; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,.18); z-index: 60;
+}
+.chat-panel {
+  position: fixed; right: 22px; bottom: 86px; width: 380px; height: 480px; z-index: 61;
+  background: #fff; border: 1px solid #dfe7e4; border-radius: 12px; overflow: hidden;
+  display: flex; flex-direction: column; box-shadow: 0 12px 32px rgba(0,0,0,.16);
+}
+.chat-panel.hidden { display: none; }
+.chat-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #e6ecea; }
+.chat-log { flex: 1; overflow-y: auto; padding: 10px; background: #fbfcfc; }
+.chat-msg { margin: 6px 0; padding: 8px 10px; border-radius: 8px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.chat-msg.user { background: #e6f2ee; margin-left: 40px; }
+.chat-msg.assistant { background: #f2f5f4; margin-right: 20px; }
+.chat-kb { margin-top: 6px; font-size: 11px; color: #6b7c78; }
+.chat-form { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #e6ecea; }
+.chat-form input { flex: 1; padding: 8px 10px; border: 1px solid #dfe7e4; border-radius: 8px; }
+.reexam-card { margin: 10px 0; padding: 12px 14px; border-left: 4px solid #c9a227; background: #fdf8e6; border-radius: 6px; font-size: 13px; line-height: 1.7; }

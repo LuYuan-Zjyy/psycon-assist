@@ -952,7 +952,16 @@ function applyClaimFilter() {
     el.innerHTML = `<div class="empty">无符合条件的草稿</div>`;
     return;
   }
-  el.innerHTML = claims.map((c) => claimCard(c, d)).join("");
+  const r0 = state.lastReexam;
+  const reexHtml = r0
+    ? '<div class="reexam-card"><b>督导再审视</b>　判定：' + esc(r0.verdict || "-") +
+      '<br/>' + esc(r0.why || "") +
+      (r0.suggestion ? '<br/>建议：' + esc(r0.suggestion) : "") +
+      (r0.baseline_note && r0.baseline_note !== "none" ? '<br/>基线：' + esc(r0.baseline_note) : "") +
+      (r0.persona_note && r0.persona_note !== "none" ? '<br/>人设：' + esc(r0.persona_note) : "") +
+      '</div>'
+    : "";
+  el.innerHTML = reexHtml + claims.map((c) => claimCard(c, d)).join("");
   bindClaimActions(el);
 }
 
@@ -1056,7 +1065,7 @@ function bindClaimActions(el) {
 
 async function submitFeedback(claimId, action, extra = {}) {
   try {
-    await api(`/api/sessions/${state.currentSession}/feedback`, {
+    const res = await api(`/api/sessions/${state.currentSession}/feedback`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1066,6 +1075,7 @@ async function submitFeedback(claimId, action, extra = {}) {
         ...extra,
       }),
     });
+    if (res && res.reexamine) state.lastReexam = res.reexamine;
     toast("已保存反馈");
     await loadTimeline();
     await loadProfile();
@@ -1360,3 +1370,93 @@ async function refreshOverview() {
   state.sessions = ov.sessions;
   renderSelects();
 }
+
+
+/* ---------------- 咨询助手（知识库 + ReAct） ---------------- */
+state.chat = [];
+state.lastReexam = null;
+
+function chatBubble(role, text) {
+  const div = document.createElement("div");
+  div.className = "chat-msg " + role;
+  div.textContent = text;
+  return div;
+}
+
+async function sendChat(text) {
+  const log = $("#chat-log");
+  if (!log || !text.trim() || !state.currentSession) return;
+  state.chat.push({ role: "user", content: text });
+  log.appendChild(chatBubble("user", text));
+  const loading = chatBubble("assistant", "思考中…");
+  log.appendChild(loading);
+  log.scrollTop = log.scrollHeight;
+  try {
+    const res = await api("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: state.currentSession, messages: state.chat.slice(-8) }),
+    });
+    loading.textContent = res.reply || "（无回复）";
+    if (res.kb && res.kb.length) {
+      const chips = document.createElement("div");
+      chips.className = "chat-kb";
+      chips.textContent = "参考：" + res.kb.map((x) => x.id + " " + x.title).join("；");
+      loading.appendChild(chips);
+    }
+    state.chat.push({ role: "assistant", content: res.reply || "" });
+  } catch (e) {
+    loading.textContent = "助手调用失败：" + e.message;
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+(function bindChat() {
+  const fab = $("#chat-fab"), panel = $("#chat-panel"), form = $("#chat-form");
+  const input = $("#chat-input"), close = $("#chat-close");
+  if (!fab || !panel) return;
+  fab.onclick = () => {
+    panel.classList.toggle("hidden");
+    if (!panel.classList.contains("hidden")) input.focus();
+  };
+  close.onclick = () => panel.classList.add("hidden");
+  form.onsubmit = (ev) => {
+    ev.preventDefault();
+    const t = input.value;
+    input.value = "";
+    sendChat(t);
+  };
+})();
+
+/* ---------------- 人工观察 ---------------- */
+(function bindNewClaim() {
+  const btn = $("#new-claim-btn"), modal = $("#claim-modal");
+  if (!btn || !modal) return;
+  btn.onclick = () => {
+    const v = $("#video");
+    const t = v && v.currentTime ? Math.round(v.currentTime) : 0;
+    $("#nc-t0").value = t;
+    $("#nc-t1").value = t + 30;
+    modal.classList.remove("hidden");
+  };
+  $("#nc-cancel").onclick = () => modal.classList.add("hidden");
+  $("#nc-save").onclick = async () => {
+    const t0 = parseFloat($("#nc-t0").value);
+    const t1 = parseFloat($("#nc-t1").value);
+    const text = ($("#nc-text").value || "").trim();
+    if (!text || !(t1 > t0)) return toast("请填写时间窗与内容");
+    try {
+      await api("/api/sessions/" + state.currentSession + "/claims", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ t0, t1, text }),
+      });
+      modal.classList.add("hidden");
+      $("#nc-text").value = "";
+      toast("已加入草稿列表");
+      await loadTimeline();
+    } catch (e) {
+      toast("保存失败：" + e.message);
+    }
+  };
+})();

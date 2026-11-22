@@ -179,6 +179,7 @@
               <button class="chip" data-filter="edit" type="button">已改写</button>
               <button class="chip" data-filter="reject" type="button">已否决</button>
             </div>
+            <button id="new-claim-btn" class="btn btn-primary" type="button">＋ 写一条观察</button>
             <span id="claim-stats" class="meta"></span>
           </div>
         </div>
@@ -275,6 +276,37 @@
       <div class="spinner"></div>
       <div id="progress-text">正在处理…</div>
       <ol id="progress-stages" class="progress-stages"></ol>
+    </div>
+  </div>
+
+  <button id="chat-fab" class="chat-fab" type="button" title="咨询助手">?</button>
+  <section id="chat-panel" class="chat-panel hidden">
+    <header class="chat-head"><b>咨询助手</b><button id="chat-close" class="modal-close" type="button" aria-label="关闭">×</button></header>
+    <div id="chat-log" class="chat-log">
+      <div class="chat-msg assistant">可以问我：这条草稿该不该采纳？这个人目前的状态是怎样的？下一步怎么疏导？</div>
+    </div>
+    <form id="chat-form" class="chat-form">
+      <input id="chat-input" placeholder="输入问题…" autocomplete="off" />
+      <button class="btn btn-primary" type="submit">发送</button>
+    </form>
+  </section>
+
+  <div id="claim-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-card">
+      <div class="modal-head"><h2>写一条观察</h2><button class="modal-close" id="nc-cancel" type="button" aria-label="关闭">×</button></div>
+      <div class="modal-body">
+        <label class="field"><span>时间窗（秒）</span>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input id="nc-t0" type="number" min="0" step="1" style="width:110px" />
+            <span>—</span>
+            <input id="nc-t1" type="number" min="0" step="1" style="width:110px" />
+          </div>
+        </label>
+        <label class="field"><span>观察内容（只写可观察的事实）</span>
+          <textarea id="nc-text" rows="4" placeholder="例如：03:20 附近他反复说「都是我的问题」，像在自责"></textarea>
+        </label>
+      </div>
+      <div class="modal-foot"><button id="nc-save" class="btn btn-primary" type="button">保存</button></div>
     </div>
   </div>
 
