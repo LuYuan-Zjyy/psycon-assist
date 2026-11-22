@@ -94,10 +94,11 @@ def _build_grid(duration: float, au, voice, text) -> list[dict]:
         t0 = round(i * step, 3)
         t1 = round(min(t0 + config.GRID_SEC, duration), 3)
         g = {"t0": t0, "t1": t1, "slot_t0": t0, "slot_t1": round(min((i + 1) * step, duration), 3)}
-        fv, fa, fc = _face_va(au, t0, t1)
+        fv, fa, fc, f_expr, f_expr_p, f_expr_ent = _face_va(au, t0, t1)
         vv, va_, vc = _voice_va(voice, t0, t1)
         tv, ta, tc = _text_va(text, t0, t1)
         g["face_v"], g["face_a"], g["conf_face"] = fv, fa, fc
+        g["face_expr"], g["face_expr_p"], g["face_expr_ent"] = f_expr, f_expr_p, f_expr_ent
         g["voice_v"], g["voice_a"], g["conf_voice"] = vv, va_, vc
         g["text_v"], g["text_a"], g["conf_text"] = tv, ta, tc
         g.update(_fuse(g))
@@ -107,15 +108,32 @@ def _build_grid(duration: float, au, voice, text) -> list[dict]:
 
 
 def _face_va(au, t0: float, t1: float):
+    """返回 (valence, arousal, coverage, 主导表情, 该表情概率, 表情熵)。
+
+    只有 V/A 两个标量会把「哭」和「大笑」压成同一象限，
+    所以这里同时保留 8 类表情分布的主导项与熵（熵高=表情模糊）。
+    """
     if au is None or au.empty:
-        return None, None, 0.0
+        return None, None, 0.0, None, None, None
     seg = au[(au["ts"] >= t0) & (au["ts"] < t1)]
     if seg.empty:
-        return None, None, 0.0
+        return None, None, 0.0, None, None, None
     cov = float((~seg["face_missing"]).sum()) / max(len(seg), 1)
     valid = seg[~seg["face_missing"]]
     if valid.empty:
-        return None, None, cov
+        return None, None, cov, None, None, None
+
+    expr = expr_p = expr_ent = None
+    if "expr" in valid.columns and valid["expr"].notna().any():
+        e = valid["expr"].dropna()
+        if len(e):
+            expr = str(e.mode().iloc[0])  # 窗口内出现最多的表情
+            if "expr_prob" in valid.columns:
+                m = valid.loc[valid["expr"] == expr, "expr_prob"].dropna()
+                expr_p = round(float(m.mean()), 4) if len(m) else None
+            if "expr_ent" in valid.columns:
+                ent = valid["expr_ent"].dropna()
+                expr_ent = round(float(ent.mean()), 4) if len(ent) else None
 
     # 直接来自 EmotiEffLib 的 VA（va_v / va_a 列）
     if "va_v" in valid.columns and "va_a" in valid.columns:
@@ -125,7 +143,7 @@ def _face_va(au, t0: float, t1: float):
             v = None
         if math.isnan(a):
             a = None
-        return v, a, cov
+        return v, a, cov, expr, expr_p, expr_ent
 
     def au_mean(c):
         return valid[c].mean() if c in valid.columns else float("nan")
@@ -141,7 +159,7 @@ def _face_va(au, t0: float, t1: float):
         m = valid[au_cols].abs().mean().mean()
         if not math.isnan(m):
             a = max(0.0, min(1.0, m / 5.0)) * 2 - 1
-    return v, a, cov
+    return v, a, cov, expr, expr_p, expr_ent
 
 
 def _voice_va(voice: list, t0: float, t1: float):
@@ -433,7 +451,17 @@ def _make_chunk(session_id, grid, s0, s1, is_anom, types) -> dict:
         "z_v": round(float(np.mean(zs)), 3) if zs else None,
         "z_a": round(float(np.mean(zas)), 3) if zas else None,
     }
-    va = {"v": va_v, "a": va_a, "conf": round(conf, 3) if conf is not None else None}
+    exprs = [g.get("face_expr") for g in grid[s0:s1] if g.get("face_expr")]
+    expr = max(set(exprs), key=exprs.count) if exprs else None
+    expr_p = _mean([g.get("face_expr_p") for g in grid[s0:s1] if g.get("face_expr") == expr])
+    expr_ent = _mean([g.get("face_expr_ent") for g in grid[s0:s1]])
+    va = {
+        "v": va_v, "a": va_a,
+        "conf": round(conf, 3) if conf is not None else None,
+        "expr": expr,
+        "expr_p": round(expr_p, 4) if expr_p is not None else None,
+        "expr_ent": round(expr_ent, 4) if expr_ent is not None else None,
+    }
     return {
         "chunk_id": f"{session_id}-C{s0:04d}",
         "t0": t0, "t1": t1,

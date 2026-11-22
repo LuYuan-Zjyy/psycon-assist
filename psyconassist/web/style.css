@@ -972,3 +972,49 @@ main {
   position: absolute; top: -2px; bottom: -2px; width: 2px; background: #c9463c;
   left: 0; transition: left .1s linear;
 }
+
+
+/* ---- 咨询助手 ---- */
+.chat-fab {
+  position: fixed; right: 22px; bottom: 22px; width: 52px; height: 52px; border-radius: 50%;
+  border: none; background: #2f6f63; color: #fff; font-size: 20px; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,.18); z-index: 60;
+}
+.chat-panel {
+  position: fixed; right: 22px; bottom: 86px; width: 380px; height: 480px; z-index: 61;
+  background: #fff; border: 1px solid #dfe7e4; border-radius: 12px; overflow: hidden;
+  display: flex; flex-direction: column; box-shadow: 0 12px 32px rgba(0,0,0,.16);
+}
+.chat-panel.hidden { display: none; }
+.chat-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid #e6ecea; }
+.chat-log { flex: 1; overflow-y: auto; padding: 10px; background: #fbfcfc; }
+.chat-msg { margin: 6px 0; padding: 8px 10px; border-radius: 8px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
+.chat-msg.user { background: #e6f2ee; margin-left: 40px; }
+.chat-msg.assistant { background: #f2f5f4; margin-right: 20px; }
+.chat-kb { margin-top: 6px; font-size: 11px; color: #6b7c78; }
+.chat-form { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #e6ecea; }
+.chat-form input { flex: 1; padding: 8px 10px; border: 1px solid #dfe7e4; border-radius: 8px; }
+.reexam-card { margin: 10px 0; padding: 12px 14px; border-left: 4px solid #c9a227; background: #fdf8e6; border-radius: 6px; font-size: 13px; line-height: 1.7; }
+
+
+/* ---- 会谈导读 ---- */
+.briefing-panel { margin-bottom: 14px; }
+.briefing-overview { font-size: 14px; line-height: 1.85; margin: 2px 0 12px; color: #26433c; }
+.briefing-phases { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.briefing-phase { display: flex; gap: 12px; align-items: baseline; padding: 7px 10px; border-radius: 6px; background: #f6f9f8; cursor: pointer; }
+.briefing-phase:hover { background: #eaf2ef; }
+.briefing-phase .ph-time { font-family: var(--mono, monospace); font-size: 12px; color: #2f6f63; min-width: 96px; }
+.briefing-phase .ph-sum { font-size: 13px; color: #33433f; }
+.briefing-sub { font-weight: 600; font-size: 13px; margin: 6px 0 6px; color: #26433c; }
+.briefing-moments { display: flex; flex-direction: column; gap: 4px; }
+.briefing-moment { display: flex; gap: 12px; align-items: baseline; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+.briefing-moment:hover { background: #fdf6e9; }
+.briefing-moment .mo-time { font-family: var(--mono, monospace); font-size: 12px; color: #8a6d1f; min-width: 96px; }
+.briefing-moment .mo-title { flex: 1; font-size: 13px; color: #33433f; }
+.briefing-moment .mo-sev { font-size: 11px; padding: 1px 6px; border-radius: 10px; background: #eef1f0; color: #6b7c78; }
+.briefing-moment .mo-sev.sev-high { background: #fbe9e7; color: #b0433a; }
+.briefing-moment .mo-sev.sev-medium { background: #fdf1dd; color: #9a6b1a; }
+.briefing-caveats { margin-top: 12px; font-size: 12px; color: #6b7c78; }
+.briefing-caveats summary { cursor: pointer; }
+.briefing-caveats ul { margin: 6px 0 0 18px; padding: 0; }
+.briefing-caveats li { margin: 3px 0; }

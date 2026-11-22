@@ -269,6 +269,7 @@ async function loadTimeline() {
   state.voiceBase = null;
   const safe = (fn, arg) => { try { fn(arg); } catch (e) { console.error(e); } };
   safe(renderBrief, d);
+  safe(renderBriefing, d);
   safe(renderQuality, d);
   safe(renderVideo, d);
   safe(renderEvents, d);
@@ -464,7 +465,16 @@ function updateHud(t) {
   if (vv) vv.textContent = v == null ? "—" : v.toFixed(2);
   if (av) av.textContent = a == null ? "—" : a.toFixed(2);
   const emo = $("#hud-emo");
-  if (emo) emo.textContent = emotionWord(v, a);
+  const chunk = chunkAt(t);
+  const EXPR_ZH = { Neutral: "中性", Happiness: "高兴", Sadness: "悲伤", Surprise: "惊讶",
+                    Fear: "恐惧", Disgust: "厌恶", Anger: "愤怒", Contempt: "轻蔑" };
+  if (emo) {
+    if (chunk && chunk.expr) {
+      emo.textContent = (EXPR_ZH[chunk.expr] || chunk.expr) + (chunk.expr_p == null ? "" : " " + chunk.expr_p.toFixed(2));
+    } else {
+      emo.textContent = emotionWord(v, a);
+    }
+  }
 
   const ph = $("#mini-playhead");
   const dur = state.sessionDetail?.media?.duration || 0;
@@ -780,9 +790,14 @@ function updateNowState(t) {
   if (fv == null && chunk?.v != null) { fv = chunk.v; fa = chunk.a; }
 
   if (faceEl) {
-    faceEl.innerHTML = (fv != null || fa != null)
+    const EXPR = { Neutral: "中性", Happiness: "高兴", Sadness: "悲伤", Surprise: "惊讶",
+                   Fear: "恐惧", Disgust: "厌恶", Anger: "愤怒", Contempt: "轻蔑" };
+    const eTxt = chunk && chunk.expr
+      ? `<br/>表情 <b>${EXPR[chunk.expr] || chunk.expr}</b>${chunk.expr_p == null ? "" : " " + chunk.expr_p.toFixed(2)}${chunk.expr_ent == null ? "" : `（熵 ${chunk.expr_ent.toFixed(2)}）`}`
+      : "";
+    faceEl.innerHTML = ((fv != null || fa != null)
       ? `效价 <b>${fv == null ? "—" : fv.toFixed(3)}</b> · 唤醒 <b>${fa == null ? "—" : fa.toFixed(3)}</b>`
-      : "不可得";
+      : "不可得") + eTxt;
   }
   try { updateHud(t); } catch (e) { console.error(e); }
 
@@ -938,7 +953,16 @@ function applyClaimFilter() {
     el.innerHTML = `<div class="empty">无符合条件的草稿</div>`;
     return;
   }
-  el.innerHTML = claims.map((c) => claimCard(c, d)).join("");
+  const r0 = state.lastReexam;
+  const reexHtml = r0
+    ? '<div class="reexam-card"><b>督导再审视</b>　判定：' + esc(r0.verdict || "-") +
+      '<br/>' + esc(r0.why || "") +
+      (r0.suggestion ? '<br/>建议：' + esc(r0.suggestion) : "") +
+      (r0.baseline_note && r0.baseline_note !== "none" ? '<br/>基线：' + esc(r0.baseline_note) : "") +
+      (r0.persona_note && r0.persona_note !== "none" ? '<br/>人设：' + esc(r0.persona_note) : "") +
+      '</div>'
+    : "";
+  el.innerHTML = reexHtml + claims.map((c) => claimCard(c, d)).join("");
   bindClaimActions(el);
 }
 
@@ -1042,7 +1066,7 @@ function bindClaimActions(el) {
 
 async function submitFeedback(claimId, action, extra = {}) {
   try {
-    await api(`/api/sessions/${state.currentSession}/feedback`, {
+    const res = await api(`/api/sessions/${state.currentSession}/feedback`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1052,6 +1076,7 @@ async function submitFeedback(claimId, action, extra = {}) {
         ...extra,
       }),
     });
+    if (res && res.reexamine) state.lastReexam = res.reexamine;
     toast("已保存反馈");
     await loadTimeline();
     await loadProfile();
@@ -1345,4 +1370,168 @@ async function refreshOverview() {
   state.subjects = ov.subjects;
   state.sessions = ov.sessions;
   renderSelects();
+}
+
+
+/* ---------------- 咨询助手（知识库 + ReAct） ---------------- */
+state.chat = [];
+state.lastReexam = null;
+
+function chatBubble(role, text) {
+  const div = document.createElement("div");
+  div.className = "chat-msg " + role;
+  div.textContent = text;
+  return div;
+}
+
+async function sendChat(text) {
+  const log = $("#chat-log");
+  if (!log || !text.trim() || !state.currentSession) return;
+  state.chat.push({ role: "user", content: text });
+  log.appendChild(chatBubble("user", text));
+  const loading = chatBubble("assistant", "思考中…");
+  log.appendChild(loading);
+  log.scrollTop = log.scrollHeight;
+  try {
+    const res = await api("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: state.currentSession, messages: state.chat.slice(-8) }),
+    });
+    loading.textContent = res.reply || "（无回复）";
+    if (res.kb && res.kb.length) {
+      const chips = document.createElement("div");
+      chips.className = "chat-kb";
+      chips.textContent = "参考：" + res.kb.map((x) => x.id + " " + x.title).join("；");
+      loading.appendChild(chips);
+    }
+    state.chat.push({ role: "assistant", content: res.reply || "" });
+  } catch (e) {
+    loading.textContent = "助手调用失败：" + e.message;
+  }
+  log.scrollTop = log.scrollHeight;
+}
+
+(function bindChat() {
+  const fab = $("#chat-fab"), panel = $("#chat-panel"), form = $("#chat-form");
+  const input = $("#chat-input"), close = $("#chat-close");
+  if (!fab || !panel) return;
+  fab.onclick = () => {
+    panel.classList.toggle("hidden");
+    if (!panel.classList.contains("hidden")) input.focus();
+  };
+  close.onclick = () => panel.classList.add("hidden");
+  form.onsubmit = (ev) => {
+    ev.preventDefault();
+    const t = input.value;
+    input.value = "";
+    sendChat(t);
+  };
+})();
+
+/* ---------------- 人工观察 ---------------- */
+(function bindNewClaim() {
+  const btn = $("#new-claim-btn"), modal = $("#claim-modal");
+  if (!btn || !modal) return;
+  btn.onclick = () => {
+    const v = $("#video");
+    const t = v && v.currentTime ? Math.round(v.currentTime) : 0;
+    $("#nc-t0").value = t;
+    $("#nc-t1").value = t + 30;
+    modal.classList.remove("hidden");
+  };
+  $("#nc-cancel").onclick = () => modal.classList.add("hidden");
+  $("#nc-save").onclick = async () => {
+    const t0 = parseFloat($("#nc-t0").value);
+    const t1 = parseFloat($("#nc-t1").value);
+    const text = ($("#nc-text").value || "").trim();
+    if (!text || !(t1 > t0)) return toast("请填写时间窗与内容");
+    try {
+      await api("/api/sessions/" + state.currentSession + "/claims", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ t0, t1, text }),
+      });
+      modal.classList.add("hidden");
+      $("#nc-text").value = "";
+      toast("已加入草稿列表");
+      await loadTimeline();
+    } catch (e) {
+      toast("保存失败：" + e.message);
+    }
+  };
+})();
+
+
+/* ---------------- 会谈导读（briefing） ---------------- */
+function fmtMMSS(sec) {
+  const s = Math.max(0, Math.round(sec || 0));
+  const m = Math.floor(s / 60);
+  return String(m).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
+}
+
+function renderBriefing(d) {
+  const card = $("#briefing-card");
+  if (!card) return;
+  const b = d.briefing;
+  const body = $("#briefing-body");
+  const meta = $("#briefing-meta");
+  card.classList.remove("hidden");
+
+  if (!b) {
+    $("#briefing-overview").textContent =
+      "这场会谈是用旧版本分析的，没有导读。重新分析后会生成导读（结果写入新会话，不覆盖本场）。";
+    $("#briefing-phases").innerHTML = "";
+    $("#briefing-moments").innerHTML = "";
+    const cav = $("#briefing-caveats");
+    if (cav) cav.classList.add("hidden");
+    if (meta) meta.textContent = "";
+    return;
+  }
+
+  $("#briefing-overview").textContent = b.overview || "";
+
+  const phases = b.phases || [];
+  $("#briefing-phases").innerHTML = phases.map((p) => {
+    return '<div class="briefing-phase" data-t="' + (p.t0 || 0) + '">' +
+      '<span class="ph-time">' + fmtMMSS(p.t0) + "–" + fmtMMSS(p.t1) + '</span>' +
+      '<span class="ph-sum">' + esc(p.summary || "") + '</span></div>';
+  }).join("");
+  $("#briefing-phases").querySelectorAll(".briefing-phase").forEach((el) => {
+    el.onclick = () => seekTo(parseFloat(el.dataset.t) || 0);
+  });
+
+  const moments = b.key_moments || [];
+  $("#briefing-moments").innerHTML = moments.length
+    ? moments.map((m) => {
+        const sev = m.severity === "high" ? "高" : m.severity === "medium" ? "中" : "低";
+        return '<div class="briefing-moment" data-t="' + (m.peak_t != null ? m.peak_t : (m.t0 || 0)) + '">' +
+          '<span class="mo-time">' + fmtMMSS(m.t0) + '</span>' +
+          '<span class="mo-title">' + esc(m.title || "") + '</span>' +
+          '<span class="mo-sev sev-' + (m.severity || "low") + '">' + sev + '</span></div>';
+      }).join("")
+    : '<div class="empty">本场没有需要特别回看的时刻</div>';
+  $("#briefing-moments").querySelectorAll(".briefing-moment").forEach((el) => {
+    el.onclick = () => seekTo(parseFloat(el.dataset.t) || 0);
+  });
+
+  const cav = $("#briefing-caveats");
+  const list = $("#briefing-caveat-list");
+  let notes = b.caveats;
+  if (notes && !Array.isArray(notes)) notes = Object.values(notes);
+  if (cav && list) {
+    if (notes && notes.length) {
+      list.innerHTML = notes.map((x) => "<li>" + esc(String(x)) + "</li>").join("");
+      cav.classList.remove("hidden");
+    } else {
+      cav.classList.add("hidden");
+    }
+  }
+
+  if (meta) {
+    const c = b.counts || {};
+    const sev = c.by_severity || {};
+    meta.textContent = "事件 " + (c.events || 0) + " · 高 " + (sev.high || 0) +
+      " · 回看 " + moments.length + (b.llm_ok === false ? " · 概览由规则生成" : "");
+  }
 }

@@ -22,6 +22,9 @@ from .core.io import read_json_optional, write_json
 from .core.logging_utils import get_logger
 from .core.paths import SessionPaths, SubjectPaths
 from .stages import s5_feedback, s6_profile
+from .agent import assistant as asst
+from .agent import reexamine as reexam
+from .kb import search as kb_search
 
 log = get_logger(__name__)
 app = FastAPI(title="PsyConAssist", version="0.1.0")
@@ -259,6 +262,8 @@ def session_detail(session_id: str):
         timeline.append({
             "t0": c["t0"], "t1": c["t1"],
             "v": va.get("v"), "a": va.get("a"),
+            "expr": va.get("expr"), "expr_p": va.get("expr_p"), "expr_ent": va.get("expr_ent"),
+            "expr_top3": va.get("expr_top3") or [],
             "is_anomaly": c.get("is_anomaly", False),
             "anomaly_type": c.get("anomaly_type"),
             "chunk_id": c.get("chunk_id"),
@@ -286,8 +291,11 @@ def session_detail(session_id: str):
         # 视觉增强：逐秒人脸框 / 逐秒 VA / LLM 观察笔记（有就返回，没有就是空数组）
         "face_boxes": read_json_optional(p.root / "face" / "face_boxes.json", default=[]) or [],
         "va_series": read_json_optional(p.root / "face" / "va_series.json", default=[]) or [],
-        "llm_notes": read_json_optional(p.root / "agent" / "llm_notes.json", default=[]) or [],
-        "baseline": read_json_optional(p.root / "face" / "baseline.json", default=None),
+        "llm_notes": read_json_optional(p.notes_json, default=[]) or [],
+        "baseline": read_json_optional(p.baseline_json, default=None),
+        # 逐秒融合轨迹与会谈导读（旧会话没有这两个文件 → 前端退回按片段显示）
+        "track": read_json_optional(p.track_json, default=[]) or [],
+        "briefing": read_json_optional(p.briefing_json, default=None),
         "has_video": bool(media.get("normalized_path") and Path(media["normalized_path"]).exists()),
     }
 
@@ -333,7 +341,78 @@ def submit_feedback(session_id: str, body: FeedbackBody):
             p["exemplars_count"] = len(s6_profile.load_exemplars(body.subject_id))
             write_json(sp.profile_json, p)
     stats = s5_feedback.stats(session_id)
-    return {"feedback": fb, "stats": stats}
+    # 咨询师改/否决后，ReAct 再审视：重看证据与基线，给出督导式说明
+    note = None
+    if body.action in ("edit", "reject"):
+        try:
+            claims = read_json_optional(_safe_session(session_id).claims_json, default=[]) or []
+            target = next((c for c in claims if c.get("sid") == body.claim_id), None)
+            if target:
+                note = reexam.run(session_id, target, body.action, body.reason, body.revised_text)
+        except Exception as e:  # noqa: BLE001
+            log.warning("reexamine 失败 session=%s: %s", session_id, e)
+    return {"feedback": fb, "stats": stats, "reexamine": note}
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatBody(BaseModel):
+    session_id: str
+    messages: list[ChatMessage]
+    t0: float | None = None
+    t1: float | None = None
+
+
+class ClaimBody(BaseModel):
+    t0: float
+    t1: float
+    text: str
+    evidence_ids: list[str] | None = None
+
+
+@app.post("/api/chat")
+def chat(body: ChatBody):
+    """咨询辅助助手：知识库 + 会话上下文 + ReAct 工具循环。"""
+    _safe_session(body.session_id)
+    history = [{"role": m.role, "content": m.content} for m in body.messages]
+    return asst.chat(body.session_id, history, t0=body.t0, t1=body.t1)
+
+
+@app.get("/api/kb/search")
+def kb_search_api(q: str, k: int = 4):
+    return {"query": q, "items": kb_search(q, k=k)}
+
+
+@app.get("/api/sessions/{session_id}/reexamine")
+def get_reexamine(session_id: str):
+    sp = _safe_session(session_id)
+    items = read_json_optional(sp.root / "agent" / "reexamine.json", default=[]) or []
+    return {"items": items}
+
+
+@app.post("/api/sessions/{session_id}/claims")
+def create_claim(session_id: str, body: ClaimBody):
+    """咨询师自己写一条观察（人工证据），进入同一套复核闭环。"""
+    sp = _safe_session(session_id)
+    claims = read_json_optional(sp.claims_json, default=[]) or []
+    n = sum(1 for c in claims if c.get("source") == "human") + 1
+    claim = {
+        "sid": f"{session_id}-H{n:04d}",
+        "event_id": None,
+        "text": body.text.strip(),
+        "evidence_ids": body.evidence_ids or [],
+        "state": "pending",
+        "source": "human",
+        "t0": body.t0,
+        "t1": body.t1,
+    }
+    claims.append(claim)
+    write_json(sp.claims_json, claims)
+    log.info("human claim session=%s sid=%s", session_id, claim["sid"])
+    return {"claim": claim}
 
 
 @app.get("/media/{session_id}/norm.mp4")
